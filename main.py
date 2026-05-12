@@ -1,7 +1,7 @@
 import os
 import random
 import requests
-from moviepy.editor import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, AudioFileClip
 
 # جلب البيانات من الـ Secrets الخاصة بـ GitHub
 PEXELS_API_KEY = os.getenv('PEXELS_API_KEY')
