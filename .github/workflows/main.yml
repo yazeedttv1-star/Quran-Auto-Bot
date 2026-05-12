@@ -1,0 +1,29 @@
+name: Video Generator Bot
+
+on:
+  workflow_dispatch: # يسمح لك بتشغيل المشروع يدوياً بضغطة زر
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install moviepy python-telegram-bot requests
+        sudo apt-get install ffmpeg  # ضروري جداً للمونتاج
+
+    - name: Run Script
+      run: python main.py
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
