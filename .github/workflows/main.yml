@@ -11,10 +11,10 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # تم التحديث من v3 إلى v4 لتجنب التحذير
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # تم التحديث من v4 إلى v5 لتجنب التحذير
       with:
         python-version: '3.9'
         cache: 'pip'
