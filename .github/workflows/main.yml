@@ -5,20 +5,16 @@ on:
     - cron: '0 2 * * *' # الساعة 5 صباحاً بتوقيت مصر
   workflow_dispatch: # للتشغيل اليدوي
 
-# إضافة هذا السطر لإجبار السيرفر على تشغيل كل الـ Actions بـ Node.js 24 وإخفاء التحذير
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4.1.7 # تحديث للإصدار الفرعي الذي يدعم Node 24 رسمياً
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v5.1.1 # تحديث للإصدار الفرعي الذي يدعم Node 24 رسمياً
       with:
         python-version: '3.9'
         cache: 'pip'
