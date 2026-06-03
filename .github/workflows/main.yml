@@ -5,16 +5,20 @@ on:
     - cron: '0 2 * * *' # الساعة 5 صباحاً بتوقيت مصر
   workflow_dispatch: # للتشغيل اليدوي
 
+# إضافة هذا السطر لإجبار السيرفر على تشغيل كل الـ Actions بـ Node.js 24 وإخفاء التحذير
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4 # تم التحديث من v3 إلى v4 لتجنب التحذير
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5 # تم التحديث من v4 إلى v5 لتجنب التحذير
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
         cache: 'pip'
