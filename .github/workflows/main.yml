@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # إضافة هذا المتغير هنا يجبر الـ Actions على استخدام Node 24 بدون تحذيرات
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -30,3 +32,10 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install moviepy==1.0.3 requests pillow numpy arabic-reshaper python-bidi
+
+    - name: Run Script
+      env:
+        PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python main.py
