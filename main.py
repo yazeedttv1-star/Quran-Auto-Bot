@@ -55,13 +55,37 @@ def make_pro_video_for_yazeed(index):
     else:
         video_clip = video_clip.subclip(0, duration)
 
-    # إضافة اسم "yazeed" في الأسفل
-    try:
-        txt_clip = TextClip(YOUR_NAME, fontsize=40, color='white', font='Arial-Bold', method='caption')
-        txt_clip = txt_clip.set_position(('center', video_clip.h - 150)).set_duration(duration).set_opacity(0.6)
-    except Exception as e:
-        print("خطأ في إضافة النص")
+    # دمج الصوت مع الفيديو أولاً
+    audio_clip = AudioFileClip(audio_path)
+    video_clip = video_clip.set_audio(audio_clip)
 
-# تشغيل الدالة لإنتاج الفيديو
+    # إضافة اسم "yazeed" في الأسفل بطريقة متوافقة مع السيرفر الافتراضي
+    final_clip = video_clip
+    try:
+        # تم إزالة الشروط المعقدة واستخدام طريقة الـ Caption الأساسية المدعومة في نظام التشغيل مباشرة
+        txt_clip = TextClip(YOUR_NAME, fontsize=40, color='white', font='Liberation-Sans', method='caption', size=(video_clip.w, 100))
+        txt_clip = txt_clip.set_position(('center', video_clip.h - 150)).set_duration(duration).set_opacity(0.6)
+        final_clip = CompositeVideoClip([video_clip, txt_clip])
+    except Exception as e:
+        print(f"تنبيه: تم إرسال الفيديو بدون نص بسبب قيود السيرفر. الخطأ: {e}")
+
+    # تصدير وإرسال الفيديو
+    output_filename = "quran_daily.mp4"
+    final_clip.write_videofile(output_filename, fps=24, codec="libx264", audio_codec="aac", threads=4, logger=None)
+    
+    # دالة الإرسال مدمجة تلقائياً لتوصيل الفيديو لهاتفك
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+    with open(output_filename, 'rb') as video_file:
+        payload = {'chat_id': TELEGRAM_CHAT_ID, 'caption': f"فيديو قرآني خاشع 🌸\n✨ مبرمج بواسطة {YOUR_NAME}"}
+        files = {'video': video_file}
+        requests.post(url, data=payload, files=files)
+
+    # تنظيف السيرفر
+    final_clip.close()
+    video_clip.close()
+    audio_clip.close()
+    for file in ["v_temp.mp4", "final.mp3", output_filename]:
+        if os.path.exists(file): os.remove(file)
+
 if __name__ == "__main__":
-    make_pro_video_for_yazeed(1)
+    make_pro
