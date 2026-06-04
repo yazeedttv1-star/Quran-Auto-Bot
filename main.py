@@ -19,7 +19,7 @@ def get_quran_with_keywords():
     surah_num = random.randint(1, 114)
     current_ayah = random.randint(1, 15)
     
-    # الكلمات المحددة فقط: جبال، أنهار، طبيعة
+    # الكلمات المفتاحية التي حددتها أنت فقط
     search_keywords = ['mountains', 'river', 'nature']
     
     while total_duration < MIN_DURATION:
@@ -56,9 +56,12 @@ def make_pro_video_for_yazeed(index):
         video_clip = video_clip.subclip(0, duration)
 
     # إضافة اسم "yazeed" في الأسفل
-    # ملاحظة: إذا لم يتوفر ImageMagick، سيتخطى الكود إضافة النص ليعمل الفيديو
     try:
         txt_clip = TextClip(YOUR_NAME, fontsize=40, color='white', font='Arial-Bold', method='caption')
         txt_clip = txt_clip.set_position(('center', video_clip.h - 150)).set_duration(duration).set_opacity(0.6)
     except Exception as e:
         print("خطأ في إضافة النص")
+
+# تشغيل الدالة لإنتاج الفيديو
+if __name__ == "__main__":
+    make_pro_video_for_yazeed(1)
