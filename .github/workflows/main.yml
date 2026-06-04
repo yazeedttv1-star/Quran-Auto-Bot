@@ -21,19 +21,12 @@ jobs:
         python-version: '3.9'
         cache: 'pip'
 
-    - name: Install FFmpeg and Arabic Fonts
+    - name: Install FFmpeg
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg fonts-liberation fonts-noto-core
+        sudo apt-get install -y ffmpeg
 
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install moviepy==1.0.3 requests pillow numpy
-
-    - name: Run Script
-      env:
-        PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python main.py
+        pip install moviepy==1.0.3 requests pillow numpy arabic-reshaper python-bidi
