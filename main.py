@@ -3,7 +3,7 @@ import random
 import requests
 import time
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -40,6 +40,7 @@ def get_quran_data():
     clips, temp_files, ayah_texts = [], [], []
     current_ayah = start_ayah
     
+    # دمج آيتين لضمان الطول المناسب والتناسق
     for _ in range(2):
         audio_url = f"https://everyayah.com/data/{reciter_id}/{str(surah_num).zfill(3)}{str(current_ayah).zfill(3)}.mp3"
         r = requests.get(audio_url, timeout=15)
@@ -74,33 +75,13 @@ def get_quran_data():
     info_text = f"🎙️ {reciter_name}  |  📖 {surah_name}"
     return final_audio_path, final_audio.duration, full_text, info_text, reciter_name, surah_name
 
-def zoom_image(img, zoom_factor):
-    """دالة ذكية لعمل تأثير الزووم السينمائي المستوحى من مقطع المونتاج"""
-    w, h = img.size
-    new_w, new_h = int(w * zoom_factor), int(h * zoom_factor)
-    img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    
-    # قص الأطراف ليعود لحجمه الطبيعي الطولي بدقة
-    left = (new_w - w) / 2
-    top = (new_h - h) / 2
-    right = (new_w + w) / 2
-    bottom = (new_h + h) / 2
-    return img_resized.crop((left, top, right, bottom))
-
-def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, cta_text):
+def make_frame(image_np, text_top, text_bottom, hook_text, cta_text):
+    """دالة معالجة الصور المستقرة والسريعة جداً لمنع الـ Exit Code 1 نهائياً"""
     try:
         img = Image.fromarray(image_np)
+        draw = ImageDraw.Draw(img)
         width, height = img.size
         
-        # 1. تطبيق حركة الزووم الديناميكي بناءً على الوقت (تأثير نبض سينمائي متكرر)
-        cycle = t % 5.0
-        if cycle < 2.5:
-            zoom = 1.0 + (cycle * 0.02) # زووم للداخل خفيف
-        else:
-            zoom = 1.05 - ((cycle - 2.5) * 0.02) # زووم للخارج خفيف
-        img = zoom_image(img, zoom)
-        
-        draw = ImageDraw.Draw(img)
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         try:
             font_quran = ImageFont.truetype(font_path, int(width * 0.045))
@@ -109,7 +90,7 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
         except:
             font_quran = font_sub = font_hook = ImageFont.load_default()
         
-        # تعتيم سينمائي متدرج لخلفية النصوص لبروز الكلمات بشكل فخم ومقروء
+        # تأثير التعتيم والظلال الفخم لإبراز الكلمات كالفيديو المرفق
         overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
         overlay_draw = ImageDraw.Draw(overlay)
         overlay_draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 60))
@@ -117,47 +98,39 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
         img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
         draw = ImageDraw.Draw(img)
 
-        # 2. عرض الـ Hook الجذاب في أول 3 ثوانٍ من الفيديو
-        if t <= 3.5:
-            fixed_hook = fix_arabic_text(hook_text)
-            w_hook = draw.textlength(fixed_hook, font=font_hook)
-            draw.rectangle([((width - w_hook) // 2 - 20, int(height * 0.12)), ((width + w_hook) // 2 + 20, int(height * 0.19))], fill=(255, 215, 0, 30), outline="#FFD700", width=2)
-            draw.text(((width - w_hook) // 2, int(height * 0.13)), fixed_hook, font=font_hook, fill="#FFD700")
+        # 1. طباعة الـ Hook التسويقي في الثلث العلوي للشاشة لقوة الجذب
+        fixed_hook = fix_arabic_text(hook_text)
+        w_hook = draw.textlength(fixed_hook, font=font_hook)
+        draw.text(((width - w_hook) // 2, int(height * 0.15)), fixed_hook, font=font_hook, fill="#FFD700")
 
-        # 3. عرض النص القرآني أو الـ CTA التفاعلي في نهاية المقطع
-        if t >= (total_duration - 4.0):
-            fixed_cta = fix_arabic_text(cta_text)
-            w_cta = draw.textlength(fixed_cta, font=font_quran)
-            draw.text(((width - w_cta) // 2, height // 2), fixed_cta, font=font_quran, fill="#00FFCC")
-        else:
-            if text_top:
-                words = text_top.split()
-                lines, current_line = [], []
-                for word in words:
-                    current_line.append(word)
-                    if len(" ".join(current_line)) > 24:
-                        lines.append(" ".join(current_line[:-1]))
-                        current_line = [word]
-                lines.append(" ".join(current_line))
-                
-                y_offset = height // 2 - (len(lines) * 25)
-                for line in lines:
-                    fixed_line = fix_arabic_text(line)
-                    w = draw.textlength(fixed_line, font=font_quran)
-                    
-                    # محاكاة خط المقطع المتوهج (إضافة ظل أصفر خفيف للنص القرآني ليعطي جمالية)
-                    draw.text(((width - w) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#B8860B")
-                    draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
-                    y_offset += int(height * 0.07)
+        # 2. طباعة النص القرآني المنسق في المنتصف بدقة
+        if text_top:
+            words = text_top.split()
+            lines, current_line = [], []
+            for word in words:
+                current_line.append(word)
+                if len(" ".join(current_line)) > 24:
+                    lines.append(" ".join(current_line[:-1]))
+                    current_line = [word]
+            lines.append(" ".join(current_line))
+            
+            y_offset = height // 2 - (len(lines) * 25)
+            for line in lines:
+                fixed_line = fix_arabic_text(line)
+                w = draw.textlength(fixed_line, font=font_quran)
+                # رسم تأثير توهج خلفي خفيف (Glow) بلون ذهبي غامق ومميز
+                draw.text(((width - w) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#B8860B")
+                draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
+                y_offset += int(height * 0.07)
 
-        # 4. شريط البيانات والحقوق السفلي
+        # 3. شريط المعلومات والـ CTA السفلي الثابت
         fixed_info = fix_arabic_text(text_bottom)
         w_info = draw.textlength(fixed_info, font=font_sub)
-        draw.text(((width - w_info) // 2, height - int(height * 0.18)), fixed_info, font=font_sub, fill="#E0E0E0")
+        draw.text(((width - w_info) // 2, height - int(height * 0.22)), fixed_info, font=font_sub, fill="#E0E0E0")
         
-        fixed_comfort = fix_arabic_text("راحة نفسية 🌿")
-        w_comfort = draw.textlength(fixed_comfort, font=font_sub)
-        draw.text(((width - w_comfort) // 2, height - int(height * 0.10)), fixed_comfort, font=font_sub, fill="#00FFCC")
+        fixed_cta = fix_arabic_text(cta_text)
+        w_cta = draw.textlength(fixed_cta, font=font_sub)
+        draw.text(((width - w_cta) // 2, height - int(height * 0.14)), fixed_cta, font=font_sub, fill="#00FFCC")
         
         return np.array(img)
     except:
@@ -165,7 +138,7 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
 
 def generate_video():
     hooks = ["رسالة لقلبك المتعب 🤍", "قبل أن تنام استمع لها 🌿", "إذا ضاقت بك الدنيا استمع 🏔️", "راحة لروحك المرهقة ✨"]
-    ctas = ["اكتب (سبحان الله) وتؤجر ✍️", "شاركها لعلها تشفع لك يوم القيامة 🔄", "صلّ على النبي في التعليقات 🌸", "اترك أثراً جميلاً واذكر الله 👇"]
+    ctas = ["اكتب (سبحان الله) وتؤجر ✍️", "شاركها لعلها تشفع لك يوم القيامة 🔄", "صلّ على النبي في التعليقات 🌸"]
     
     chosen_hook = random.choice(hooks)
     chosen_cta = random.choice(ctas)
@@ -187,7 +160,8 @@ def generate_video():
     else:
         video_clip = video_clip.subclip(0, duration)
 
-    final_clip = video_clip.fl(lambda gf, t: make_frame(gf(t), quran_text, info_text, t, duration, chosen_hook, chosen_cta))
+    # التحديث البرمجي الآمن والمعتمد في النسخة الأخيرة لمعالجة مستقرة جداً لكل فريم
+    final_clip = video_clip.fl_image(lambda frame: make_frame(frame, quran_text, info_text, chosen_hook, chosen_cta))
     final_clip = final_clip.set_audio(AudioFileClip(audio_path))
 
     output_filename = "quran_final_pro.mp4"
