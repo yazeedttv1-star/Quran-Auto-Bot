@@ -84,7 +84,6 @@ def get_quran_data():
     return final_audio_path, final_audio.duration, full_text, info_text, reciter_name, surah_name
 
 def create_text_overlay(width, height, text_top, text_bottom, hook_text, cta_text):
-    """صناعة صورة شفافة للنصوص لمنع اللخبطة وعرض النص العربي بشكل سليم 100%"""
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
@@ -96,16 +95,13 @@ def create_text_overlay(width, height, text_top, text_bottom, hook_text, cta_tex
     except:
         font_quran = font_sub = font_hook = ImageFont.load_default()
         
-    # خلفية تعتيم سينمائي للنصوص
     draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 60))
     draw.rectangle([(0, height // 3), (width, height - 80)], fill=(0, 0, 0, 120))
 
-    # 1. الـ Hook العلوي
     fixed_hook = fix_arabic_text(hook_text)
     w_hook = draw.textlength(fixed_hook, font=font_hook)
     draw.text(((width - w_hook) // 2, int(height * 0.15)), fixed_hook, font=font_hook, fill="#FFD700")
 
-    # 2. النص القرآني في المنتصف
     if text_top:
         words = text_top.split()
         lines, current_line = [], []
@@ -124,7 +120,6 @@ def create_text_overlay(width, height, text_top, text_bottom, hook_text, cta_tex
             draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
             y_offset += int(height * 0.07)
 
-    # 3. شريط المعلومات والـ CTA السفلي
     fixed_info = fix_arabic_text(text_bottom)
     w_info = draw.textlength(fixed_info, font=font_sub)
     draw.text(((width - w_info) // 2, height - int(height * 0.22)), fixed_info, font=font_sub, fill="#E0E0E0")
@@ -159,6 +154,37 @@ def generate_video():
     else:
         video_clip = video_clip.subclip(0, duration)
 
-    # توليد الصورة الشفافة للنصوص المكتوبة بشكل صحيح وثابت
     w, h = video_clip.size
-    overlay_img = create_text_overlay(w, h, quran_text, info_text,
+    overlay_img = create_text_overlay(w, h, quran_text, info_text, chosen_hook, chosen_cta)
+    
+    overlay_clip = ImageClip(overlay_img).set_duration(duration).set_pos(("center", "center"))
+    
+    # تصحيح السطر وإغلاق الأقواس بشكل سليم لإنهاء الـ SyntaxError
+    final_clip = CompositeVideoClip([video_clip, overlay_clip])
+    final_clip = final_clip.set_audio(AudioFileClip(audio_path))
+
+    output_filename = "quran_final_pro.mp4"
+    final_clip.write_videofile(output_filename, fps=24, codec="libx264", audio_codec="aac", threads=4, logger=None)
+    
+    final_clip.close()
+    video_clip.close()
+    overlay_clip.close()
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+    with open(output_filename, 'rb') as video_file:
+        caption = (
+            f"📖 *تلاوة خاشعة يومية* 📖\n\n"
+            f"🎙️ القارئ: #{reciter.replace(' ', '_')}\n"
+            f"🕌 سورة: #{surah.replace(' ', '_')}\n\n"
+            f"◽ ◽ ◽ ◽ ◽ ◽ ◽\n"
+            f"📣 {chosen_cta}\n\n"
+            f"✨ إنتاج ومونتاج تلقائي خاص بـ: {YOUR_NAME} | #راحة_نفسية #قرآن"
+        )
+        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'video': video_file})
+        
+    time.sleep(2)
+    for file in ["v_temp.mp4", "final.mp3", output_filename]:
+        if os.path.exists(file): os.remove(file)
+
+if __name__ == "__main__":
+    generate_video()
