@@ -4,7 +4,7 @@ import requests
 import time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips
+from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips, ImageClip, CompositeVideoClip
 import arabic_reshaper
 from bidi.algorithm import get_display
 
@@ -46,9 +46,7 @@ def get_quran_data():
     
     for _ in range(2):
         audio_url = f"https://everyayah.com/data/{reciter_id}/{str(surah_num).zfill(3)}{str(current_ayah).zfill(3)}.mp3"
-        
         try:
-            # التعديل هنا: إضافة verify=False لتخطي مشاكل السيرفر والموقع المانعة للتحميل
             r = requests.get(audio_url, timeout=15, verify=False)
             if r.status_code == 200:
                 t_name = f"a_{current_ayah}.mp3"
@@ -63,15 +61,14 @@ def get_quran_data():
                 except:
                     pass
                 current_ayah += 1
-                time.sleep(1) # تهدئة الطلبات لتفادي الحظر
+                time.sleep(1)
             else:
                 break
         except:
             break
 
-    # إذا حدثت مشكلة في الخادم الرئيسي، نضع صوتاً احتياطياً كخطة بديلة لعدم انهيار الكود
     if not clips:
-        raise Exception("فشل تحميل الصوت من السيرفر الرئيسي، يرجى إعادة التشغيل لاحقاً.")
+        raise Exception("فشل تحميل الصوت من السيرفر الرئيسي")
     
     final_audio_path = "final.mp3"
     final_audio = concatenate_audioclips(clips)
@@ -86,60 +83,57 @@ def get_quran_data():
     info_text = f"🎙️ {reciter_name}  |  📖 {surah_name}"
     return final_audio_path, final_audio.duration, full_text, info_text, reciter_name, surah_name
 
-def make_frame(image_np, text_top, text_bottom, hook_text, cta_text):
+def create_text_overlay(width, height, text_top, text_bottom, hook_text, cta_text):
+    """صناعة صورة شفافة للنصوص لمنع اللخبطة وعرض النص العربي بشكل سليم 100%"""
+    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     try:
-        img = Image.fromarray(image_np)
-        draw = ImageDraw.Draw(img)
-        width, height = img.size
-        
-        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        try:
-            font_quran = ImageFont.truetype(font_path, int(width * 0.045))
-            font_sub = ImageFont.truetype(font_path, int(width * 0.035))
-            font_hook = ImageFont.truetype(font_path, int(width * 0.05))
-        except:
-            font_quran = font_sub = font_hook = ImageFont.load_default()
-        
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        overlay_draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 60))
-        overlay_draw.rectangle([(0, height // 3), (width, height - 80)], fill=(0, 0, 0, 120))
-        img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
-        draw = ImageDraw.Draw(img)
-
-        fixed_hook = fix_arabic_text(hook_text)
-        w_hook = draw.textlength(fixed_hook, font=font_hook)
-        draw.text(((width - w_hook) // 2, int(height * 0.15)), fixed_hook, font=font_hook, fill="#FFD700")
-
-        if text_top:
-            words = text_top.split()
-            lines, current_line = [], []
-            for word in words:
-                current_line.append(word)
-                if len(" ".join(current_line)) > 24:
-                    lines.append(" ".join(current_line[:-1]))
-                    current_line = [word]
-            lines.append(" ".join(current_line))
-            
-            y_offset = height // 2 - (len(lines) * 25)
-            for line in lines:
-                fixed_line = fix_arabic_text(line)
-                w = draw.textlength(fixed_line, font=font_quran)
-                draw.text(((width - w) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#B8860B")
-                draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
-                y_offset += int(height * 0.07)
-
-        fixed_info = fix_arabic_text(text_bottom)
-        w_info = draw.textlength(fixed_info, font=font_sub)
-        draw.text(((width - w_info) // 2, height - int(height * 0.22)), fixed_info, font=font_sub, fill="#E0E0E0")
-        
-        fixed_cta = fix_arabic_text(cta_text)
-        w_cta = draw.textlength(fixed_cta, font=font_sub)
-        draw.text(((width - w_cta) // 2, height - int(height * 0.14)), fixed_cta, font=font_sub, fill="#00FFCC")
-        
-        return np.array(img)
+        font_quran = ImageFont.truetype(font_path, int(width * 0.045))
+        font_sub = ImageFont.truetype(font_path, int(width * 0.035))
+        font_hook = ImageFont.truetype(font_path, int(width * 0.05))
     except:
-        return image_np
+        font_quran = font_sub = font_hook = ImageFont.load_default()
+        
+    # خلفية تعتيم سينمائي للنصوص
+    draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 60))
+    draw.rectangle([(0, height // 3), (width, height - 80)], fill=(0, 0, 0, 120))
+
+    # 1. الـ Hook العلوي
+    fixed_hook = fix_arabic_text(hook_text)
+    w_hook = draw.textlength(fixed_hook, font=font_hook)
+    draw.text(((width - w_hook) // 2, int(height * 0.15)), fixed_hook, font=font_hook, fill="#FFD700")
+
+    # 2. النص القرآني في المنتصف
+    if text_top:
+        words = text_top.split()
+        lines, current_line = [], []
+        for word in words:
+            current_line.append(word)
+            if len(" ".join(current_line)) > 24:
+                lines.append(" ".join(current_line[:-1]))
+                current_line = [word]
+        lines.append(" ".join(current_line))
+        
+        y_offset = height // 2 - (len(lines) * 25)
+        for line in lines:
+            fixed_line = fix_arabic_text(line)
+            w = draw.textlength(fixed_line, font=font_quran)
+            draw.text(((width - w) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#B8860B")
+            draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
+            y_offset += int(height * 0.07)
+
+    # 3. شريط المعلومات والـ CTA السفلي
+    fixed_info = fix_arabic_text(text_bottom)
+    w_info = draw.textlength(fixed_info, font=font_sub)
+    draw.text(((width - w_info) // 2, height - int(height * 0.22)), fixed_info, font=font_sub, fill="#E0E0E0")
+    
+    fixed_cta = fix_arabic_text(cta_text)
+    w_cta = draw.textlength(fixed_cta, font=font_sub)
+    draw.text(((width - w_cta) // 2, height - int(height * 0.14)), fixed_cta, font=font_sub, fill="#00FFCC")
+    
+    return np.array(img)
 
 def generate_video():
     hooks = ["رسالة لقلبك المتعب 🤍", "قبل أن تنام استمع لها 🌿", "إذا ضاقت بك الدنيا استمع 🏔️", "راحة لروحك المرهقة ✨"]
@@ -165,30 +159,6 @@ def generate_video():
     else:
         video_clip = video_clip.subclip(0, duration)
 
-    final_clip = video_clip.fl_image(lambda frame: make_frame(frame, quran_text, info_text, chosen_hook, chosen_cta))
-    final_clip = final_clip.set_audio(AudioFileClip(audio_path))
-
-    output_filename = "quran_final_pro.mp4"
-    final_clip.write_videofile(output_filename, fps=24, codec="libx264", audio_codec="aac", threads=4, logger=None)
-    
-    final_clip.close()
-    video_clip.close()
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-    with open(output_filename, 'rb') as video_file:
-        caption = (
-            f"📖 *تلاوة خاشعة يومية* 📖\n\n"
-            f"🎙️ القارئ: #{reciter.replace(' ', '_')}\n"
-            f"🕌 سورة: #{surah.replace(' ', '_')}\n\n"
-            f"◽ ◽ ◽ ◽ ◽ ◽ ◽\n"
-            f"📣 {chosen_cta}\n\n"
-            f"✨ إنتاج ومونتاج تلقائي خاص بـ: {YOUR_NAME} | #راحة_نفسية #قرآن"
-        )
-        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'video': video_file})
-        
-    time.sleep(2)
-    for file in ["v_temp.mp4", "final.mp3", output_filename]:
-        if os.path.exists(file): os.remove(file)
-
-if __name__ == "__main__":
-    generate_video()
+    # توليد الصورة الشفافة للنصوص المكتوبة بشكل صحيح وثابت
+    w, h = video_clip.size
+    overlay_img = create_text_overlay(w, h, quran_text, info_text,
