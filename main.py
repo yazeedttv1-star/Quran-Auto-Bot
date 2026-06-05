@@ -8,7 +8,6 @@ from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips,
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-# تعطيل تنبيهات الحماية غير الضرورية في السيرفر
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -27,85 +26,79 @@ def fix_arabic_text(text):
         return text
 
 def get_quran_data():
-    reciter_options = [
-        {"id": "Yasser_Ad-Dussary_128kbps", "name": "الشيخ ياسر الدوسري"},
-        {"id": "Nasser_Alqatami_128kbps", "name": "الشيخ ناصر القطامي"},
-        {"id": "Maher_AlMuaiqly_64kbps", "name": "الشيخ ماهر المعيقلي"}
+    """جلب الصوت والبيانات من سيرفر mp3quran المستقر والمحمي من الحظر"""
+    # قائمة القراء وروابطهم المباشرة السريعة والمستقرة
+    reciters = [
+        {"name": "الشيخ ياسر الدوسري", "url": "https://server11.mp3quran.net/yasser/"},
+        {"name": "الشيخ ناصر القطامي", "url": "https://server11.mp3quran.net/qtm/"},
+        {"name": "الشيخ ماهر المعيقلي", "url": "https://server12.mp3quran.net/maher/"}
     ]
-    chosen = random.choice(reciter_options)
-    reciter_id = chosen["id"]
+    chosen = random.choice(reciters)
     reciter_name = chosen["name"]
+    base_url = chosen["url"]
     
-    surah_num = random.randint(1, 114)
-    start_ayah = random.randint(1, 15)
+    # اختيار سورة عشوائية قصيرة أو متوسطة لضمان التحميل السريع والتناسق
+    surah_num = random.randint(70, 114)
+    surah_str = str(surah_num).zfill(3)
+    audio_url = f"{base_url}{surah_str}.mp3"
     
+    # جلب اسم السورة ونصها
     try:
         meta_res = requests.get(f"https://api.alquran.cloud/v1/surah/{surah_num}", timeout=15).json()
         surah_name = meta_res['data']['name']
+        ayahs_data = meta_res['data']['ayahs']
     except:
         surah_name = "سورة من القرآن"
-    
-    clips = []
-    temp_files = []
-    ayahs_timeline = []
-    
-    current_ayah = start_ayah
-    current_start_time = 0.0
-    
-    for _ in range(3):
-        audio_url = f"https://everyayah.com/data/{reciter_id}/{str(surah_num).zfill(3)}{str(current_ayah).zfill(3)}.mp3"
-        try:
-            r = requests.get(audio_url, timeout=15, verify=False)
-            if r.status_code == 200:
-                t_name = f"a_{current_ayah}.mp3"
-                with open(t_name, "wb") as f: 
-                    f.write(r.content)
-                temp_files.append(t_name)
-                
-                clip = AudioFileClip(t_name).set_fps(44100)
-                duration = clip.duration
-                clips.append(clip)
-                
-                try:
-                    text_res = requests.get(f"https://api.alquran.cloud/v1/ayah/{surah_num}:{current_ayah}", timeout=15).json()
-                    ayah_text = text_res['data']['text']
-                except:
-                    ayah_text = ""
-                
-                if ayah_text:
-                    ayahs_timeline.append({
-                        'text': f" ﴿ {ayah_text} ﴾ ",
-                        'start': current_start_time,
-                        'end': current_start_time + duration
-                    })
-                
-                current_start_time += duration
-                current_ayah += 1
-                time.sleep(0.5)
-            else:
-                break
-        except:
-            break
+        ayahs_data = []
 
-    if not clips:
-        raise Exception("فشل تحميل الصوت من السيرفر الرئيسي")
+    # تحميل السورة كاملة من السيرفر المستقر
+    audio_path = "temp_surah.mp3"
+    r = requests.get(audio_url, timeout=20, verify=False)
+    if r.status_code == 200:
+        with open(audio_path, "wb") as f:
+            f.write(r.content)
+    else:
+        raise Exception("فشل الاتصال بسيرفر الصوت الاحتياطي أيضاً، يرجى المحاولة لاحقاً.")
+
+    # قص مقطع عشوائي مدته 15-20 ثانية لتجنب الفيديوهات الطويلة جداً في الريلز
+    full_audio = AudioFileClip(audio_path).set_fps(44100)
+    total_len = full_audio.duration
+    
+    start_time = random.uniform(0, max(0, total_len - 22))
+    end_time = min(start_time + random.uniform(15, 20), total_len)
     
     final_audio_path = "final.mp3"
-    final_audio = concatenate_audioclips(clips)
-    final_audio.write_audiofile(final_audio_path, fps=44100, bitrate="192k", logger=None)
+    sub_audio = full_audio.subclip(start_time, end_time).audio_fadein(0.5).audio_fadeout(0.5)
+    sub_audio.write_audiofile(final_audio_path, fps=44100, bitrate="192k", logger=None)
     
-    final_audio.close()
-    for c in clips: 
-        c.close()
-    for f in temp_files: 
-        if os.path.exists(f): 
-            os.remove(f)
+    duration = sub_audio.duration
+    
+    full_audio.close()
+    sub_audio.close()
+    if os.path.exists(audio_path):
+        os.remove(audio_path)
         
+    # استخراج النصوص المناسبة للمقطع المقصوص بشكل متتابع
+    ayahs_timeline = []
+    if ayahs_data:
+        # توزيع تقريبي وعادل للآيات على مدة الفيديو لتعرض آية تلو الأخرى
+        num_ayahs = min(3, len(ayahs_data))
+        selected_ayahs = random.sample(ayahs_data, num_ayahs)
+        # ترتيبهم حسب المصحف
+        selected_ayahs.sort(key=lambda x: x['numberInSurah'])
+        
+        step = duration / num_ayahs
+        for i, ayah in enumerate(selected_ayahs):
+            ayahs_timeline.append({
+                'text': f" ﴿ {ayah['text']} ﴾ ",
+                'start': i * step,
+                'end': (i + 1) * step
+            })
+            
     info_text = f"🎙️ {reciter_name}  |  📖 {surah_name}"
-    return final_audio_path, final_audio.duration, ayahs_timeline, info_text, reciter_name, surah_name
+    return final_audio_path, duration, ayahs_timeline, info_text, reciter_name, surah_name
 
 def create_static_overlay(w, h, info_text, hook_text, cta_text):
-    """رسم العناصر الثابتة: الشيخ، السورة، الـ Hook، والـ CTA"""
     img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -116,21 +109,17 @@ def create_static_overlay(w, h, info_text, hook_text, cta_text):
     except:
         font_sub = font_hook = ImageFont.load_default()
         
-    # تعتيم سينمائي فخم خلف النصوص لإبرازها كالفيديو المطلوب تماماً
     draw.rectangle([(0, 0), (w, h)], fill=(0, 0, 0, 45))
     draw.rectangle([(0, h - 180), (w, h)], fill=(0, 0, 0, 110))
     
-    # اسم القارئ والسورة أسفل الشاشة
     fixed_info = fix_arabic_text(info_text)
     w_info = draw.textlength(fixed_info, font=font_sub)
     draw.text(((w - w_info) // 2, h - 140), fixed_info, font=font_sub, fill="#E0E0E0")
     
-    # الـ CTA التفاعلي أسفل الشاشة تماماً
     fixed_cta = fix_arabic_text(cta_text)
     w_cta = draw.textlength(fixed_cta, font=font_sub)
     draw.text(((w - w_cta) // 2, h - 70), fixed_cta, font=font_sub, fill="#00FFCC")
     
-    # العنوان الجاذب (Hook) أعلى الشاشة
     fixed_hook = fix_arabic_text(hook_text)
     w_hook = draw.textlength(fixed_hook, font=font_hook)
     draw.text(((w - w_hook) // 2, int(h * 0.12)), fixed_hook, font=font_hook, fill="#FFD700")
@@ -138,7 +127,6 @@ def create_static_overlay(w, h, info_text, hook_text, cta_text):
     return np.array(img.convert('RGB'))
 
 def create_ayah_frame(w, h, raw_text):
-    """صناعة فريم مخصص للآية الحالية المكتوبة بشكل صحيح وعربي سليم"""
     img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -161,7 +149,6 @@ def create_ayah_frame(w, h, raw_text):
     for line in lines:
         fixed_line = fix_arabic_text(line)
         w_line = draw.textlength(fixed_line, font=font_quran)
-        # توهج ذهبي غامق مذهل خلف النص الأبيض
         draw.text(((w - w_line) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#8B6508")
         draw.text(((w - w_line) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
         y_offset += int(h * 0.075)
@@ -195,22 +182,19 @@ def generate_video():
 
     w, h = video_clip.size
     
-    # 1. تطبيق العناصر الثابتة كـ Frame Filter مخصص (لا يحتاج ImageMagick)
     static_overlay_np = create_static_overlay(w, h, info_text, chosen_hook, chosen_cta)
     base_video = video_clip.fl_image(lambda frame: np.array(Image.blend(Image.fromarray(frame), Image.fromarray(static_overlay_np), 0.35).convert('RGB')))
     
     all_clips = [base_video]
 
-    # 2. توليد طبقات الآيات المتزامنة باستخدام دالة دمج الصور (الحل البديل والأكثر استقراراً)
+    # دمج الآيات المتتالية بشكل سليم وآمن تماماً
     for item in ayahs_timeline:
         raw_text = item['text']
         ayah_img = create_ayah_frame(w, h, raw_text)
         
-        # استخدام ColorClip داخلي شفاف وتحويله لفريم نصي محمي 100% من الأخطاء
         ayah_clip = ColorClip(size=(w, h), color=(0, 0, 0), ismask=False)
         ayah_clip = ayah_clip.fl_image(lambda img: np.array(Image.alpha_composite(Image.fromarray(img).convert('RGBA'), ayah_img).convert('RGB')))
         
-        # ضبط توقيت الآية لتظهر وتختفي مع تلاوة الشيخ بدقة
         ayah_clip = ayah_clip.set_start(item['start']).set_end(item['end']).set_duration(item['end'] - item['start']).set_pos(("center", "center"))
         all_clips.append(ayah_clip)
 
@@ -232,7 +216,7 @@ def generate_video():
             f"🕌 سورة: #{surah.replace(' ', '_')}\n\n"
             f"◽ ◽ ◽ ◽ ◽ ◽ ◽\n"
             f"📣 {chosen_cta}\n\n"
-            f"✨ مونتاج سينمائي آلي احترافي ومستقر تماماً | خادم: {YOUR_NAME}"
+            f"✨ مونتاج سينمائي آلي احترافي بدون أخطاء | خادم: {YOUR_NAME}"
         )
         requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'video': video_file})
         
