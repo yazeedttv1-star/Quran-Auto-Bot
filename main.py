@@ -3,7 +3,7 @@ import random
 import requests
 import time
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -29,7 +29,7 @@ def get_quran_data():
     reciter_name = chosen["name"]
     
     surah_num = random.randint(1, 114)
-    start_ayah = random.randint(1, 8)
+    start_ayah = random.randint(1, 10)
     
     try:
         meta_res = requests.get(f"https://api.alquran.cloud/v1/surah/{surah_num}", timeout=15).json()
@@ -40,7 +40,6 @@ def get_quran_data():
     clips, temp_files, ayah_texts = [], [], []
     current_ayah = start_ayah
     
-    # جلب آيتين لضمان مدة فيديو مناسبة والتركيز على الـ Hook والـ CTA
     for _ in range(2):
         audio_url = f"https://everyayah.com/data/{reciter_id}/{str(surah_num).zfill(3)}{str(current_ayah).zfill(3)}.mp3"
         r = requests.get(audio_url, timeout=15)
@@ -48,7 +47,7 @@ def get_quran_data():
             t_name = f"a_{current_ayah}.mp3"
             with open(t_name, "wb") as f: f.write(r.content)
             temp_files.append(t_name)
-            clip = AudioFileClip(t_name).set_fps(44100).audio_fadein(0.3).audio_fadeout(0.3)
+            clip = AudioFileClip(t_name).set_fps(44100).audio_fadein(0.2).audio_fadeout(0.2)
             clips.append(clip)
             
             try:
@@ -75,12 +74,33 @@ def get_quran_data():
     info_text = f"🎙️ {reciter_name}  |  📖 {surah_name}"
     return final_audio_path, final_audio.duration, full_text, info_text, reciter_name, surah_name
 
+def zoom_image(img, zoom_factor):
+    """دالة ذكية لعمل تأثير الزووم السينمائي المستوحى من مقطع المونتاج"""
+    w, h = img.size
+    new_w, new_h = int(w * zoom_factor), int(h * zoom_factor)
+    img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    
+    # قص الأطراف ليعود لحجمه الطبيعي الطولي بدقة
+    left = (new_w - w) / 2
+    top = (new_h - h) / 2
+    right = (new_w + w) / 2
+    bottom = (new_h + h) / 2
+    return img_resized.crop((left, top, right, bottom))
+
 def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, cta_text):
     try:
         img = Image.fromarray(image_np)
-        draw = ImageDraw.Draw(img)
         width, height = img.size
         
+        # 1. تطبيق حركة الزووم الديناميكي بناءً على الوقت (تأثير نبض سينمائي متكرر)
+        cycle = t % 5.0
+        if cycle < 2.5:
+            zoom = 1.0 + (cycle * 0.02) # زووم للداخل خفيف
+        else:
+            zoom = 1.05 - ((cycle - 2.5) * 0.02) # زووم للخارج خفيف
+        img = zoom_image(img, zoom)
+        
+        draw = ImageDraw.Draw(img)
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         try:
             font_quran = ImageFont.truetype(font_path, int(width * 0.045))
@@ -89,30 +109,27 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
         except:
             font_quran = font_sub = font_hook = ImageFont.load_default()
         
-        # تعتيم سينمائي للخلفية لزيادة وضوح النصوص
+        # تعتيم سينمائي متدرج لخلفية النصوص لبروز الكلمات بشكل فخم ومقروء
         overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
         overlay_draw = ImageDraw.Draw(overlay)
-        overlay_draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 50)) # تعتيم خفيف عام
-        overlay_draw.rectangle([(0, height // 3), (width, height - 80)], fill=(0, 0, 0, 110)) # تعتيم أعمق للنص
+        overlay_draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 60))
+        overlay_draw.rectangle([(0, height // 3), (width, height - 80)], fill=(0, 0, 0, 120))
         img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
         draw = ImageDraw.Draw(img)
 
-        # 1. تطبيق الـ Hook في أول 3 ثوانٍ من الفيديو (إستراتيجية جذب الانتباه)
+        # 2. عرض الـ Hook الجذاب في أول 3 ثوانٍ من الفيديو
         if t <= 3.5:
             fixed_hook = fix_arabic_text(hook_text)
             w_hook = draw.textlength(fixed_hook, font=font_hook)
-            # رسم مستطيل خلفية مميز للـ Hook
-            draw.rectangle([((width - w_hook) // 2 - 20, int(height * 0.12)), ((width + w_hook) // 2 + 20, int(height * 0.19))], fill=(255, 215, 0, 40), outline="#FFD700", width=2)
+            draw.rectangle([((width - w_hook) // 2 - 20, int(height * 0.12)), ((width + w_hook) // 2 + 20, int(height * 0.19))], fill=(255, 215, 0, 30), outline="#FFD700", width=2)
             draw.text(((width - w_hook) // 2, int(height * 0.13)), fixed_hook, font=font_hook, fill="#FFD700")
 
-        # 2. عرض نص القرآن الكريم أو الـ CTA (الدعوة للتفاعل في النهاية)
+        # 3. عرض النص القرآني أو الـ CTA التفاعلي في نهاية المقطع
         if t >= (total_duration - 4.0):
-            # عرض الـ Call To Action في آخر 4 ثوانٍ لرفع التعليقات واللايكات
             fixed_cta = fix_arabic_text(cta_text)
             w_cta = draw.textlength(fixed_cta, font=font_quran)
             draw.text(((width - w_cta) // 2, height // 2), fixed_cta, font=font_quran, fill="#00FFCC")
         else:
-            # عرض نص الآيات القرآنية
             if text_top:
                 words = text_top.split()
                 lines, current_line = [], []
@@ -127,10 +144,13 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
                 for line in lines:
                     fixed_line = fix_arabic_text(line)
                     w = draw.textlength(fixed_line, font=font_quran)
+                    
+                    # محاكاة خط المقطع المتوهج (إضافة ظل أصفر خفيف للنص القرآني ليعطي جمالية)
+                    draw.text(((width - w) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#B8860B")
                     draw.text(((width - w) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
                     y_offset += int(height * 0.07)
 
-        # 3. شريط الـ SEO والمعلومات أسفل الفيديو ثابت دائماً
+        # 4. شريط البيانات والحقوق السفلي
         fixed_info = fix_arabic_text(text_bottom)
         w_info = draw.textlength(fixed_info, font=font_sub)
         draw.text(((width - w_info) // 2, height - int(height * 0.18)), fixed_info, font=font_sub, fill="#E0E0E0")
@@ -144,7 +164,6 @@ def make_frame(image_np, text_top, text_bottom, t, total_duration, hook_text, ct
         return image_np
 
 def generate_video():
-    # اختيار عشوائي ومتجدد للـ Hook والـ CTA لضمان التنوع اليومي
     hooks = ["رسالة لقلبك المتعب 🤍", "قبل أن تنام استمع لها 🌿", "إذا ضاقت بك الدنيا استمع 🏔️", "راحة لروحك المرهقة ✨"]
     ctas = ["اكتب (سبحان الله) وتؤجر ✍️", "شاركها لعلها تشفع لك يوم القيامة 🔄", "صلّ على النبي في التعليقات 🌸", "اترك أثراً جميلاً واذكر الله 👇"]
     
@@ -168,8 +187,7 @@ def generate_video():
     else:
         video_clip = video_clip.subclip(0, duration)
 
-    # تمرير المتغيرات لدالة المعالجة الذكية للفريمات مع تتبع الوقت t
-    final_clip = video_clip.fl_image(lambda frame, t: make_frame(frame, quran_text, info_text, t, duration, chosen_hook, chosen_cta), apply_to=['mask', 'video'])
+    final_clip = video_clip.fl(lambda gf, t: make_frame(gf(t), quran_text, info_text, t, duration, chosen_hook, chosen_cta))
     final_clip = final_clip.set_audio(AudioFileClip(audio_path))
 
     output_filename = "quran_final_pro.mp4"
@@ -178,7 +196,6 @@ def generate_video():
     final_clip.close()
     video_clip.close()
     
-    # تحسين الوصف النصي لـ SEO تليجرام والخوارزميات بذكاء
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
     with open(output_filename, 'rb') as video_file:
         caption = (
