@@ -4,14 +4,13 @@ import requests
 import time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import AudioFileClip, ColorClip
 import arabic_reshaper
 from bidi.algorithm import get_display
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-PEXELS_API_KEY = os.getenv('PEXELS_API_KEY')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
@@ -26,11 +25,9 @@ def fix_arabic_text(text):
         return text
 
 def get_quran_data():
-    """دالة قوية جداً ومحدثة لتجربة كذا سيرفر صوتي لضمان التحميل بنسبة 100%"""
     surah_num = random.randint(70, 114)
     surah_str = str(surah_num).zfill(3)
     
-    # جلب نصوص الآيات أولاً
     try:
         meta_res = requests.get(f"https://api.alquran.cloud/v1/surah/{surah_num}", timeout=15).json()
         surah_name = meta_res['data']['name']
@@ -39,7 +36,6 @@ def get_quran_data():
         surah_name = "سورة من القرآن"
         ayahs_data = []
 
-    # قائمة بالروابط والسيرفرات البديلة (لو واحد علق التاني يلقطه فوراً)
     reciters = [
         {"name": "الشيخ ياسر الدوسري", "urls": [
             f"https://server11.mp3quran.net/yasser/{surah_str}.mp3",
@@ -61,13 +57,11 @@ def get_quran_data():
     audio_path = "temp_surah.mp3"
     download_success = False
     
-    # محاولة التحميل من السيرفرات المتاحة بالتوالي
     for url in chosen["urls"]:
         try:
-            # زيادة وقت الانتظار لـ 30 ثانية وإضافة Headers لخداع السيرفر كأنه متصفح عادي وليس بوت
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            headers = {'User-Agent': 'Mozilla/5.0'}
             r = requests.get(url, timeout=30, headers=headers, verify=False)
-            if r.status_code == 200 and len(r.content) > 100000: # التأكد من أن الملف سليم ومش فارغ
+            if r.status_code == 200 and len(r.content) > 100000:
                 with open(audio_path, "wb") as f:
                     f.write(r.content)
                 download_success = True
@@ -76,14 +70,12 @@ def get_quran_data():
             continue
             
     if not download_success:
-        # حل أخير كاش: تحميل سورة الفاتحة من سيرفر ثابت جداً كخط دفاع أخير عشان السكريبت مينهرش أبداً
         emergency_url = "https://server12.mp3quran.net/maher/001.mp3"
         r = requests.get(emergency_url, timeout=30, verify=False)
         with open(audio_path, "wb") as f:
             f.write(r.content)
         reciter_name = "الشيخ ماهر المعيقلي"
         surah_name = "سورة الفاتحة"
-        # جلب آيات الفاتحة
         meta_res = requests.get("https://api.alquran.cloud/v1/surah/1", timeout=15).json()
         ayahs_data = meta_res['data']['ayahs']
 
@@ -121,36 +113,34 @@ def get_quran_data():
     info_text = f"🎙️ {reciter_name}  |  📖 {surah_name}"
     return final_audio_path, duration, ayahs_timeline, info_text, reciter_name, surah_name
 
-def process_video_frame(frame, t, ayahs_timeline, info_text, hook_text, cta_text):
-    img = Image.fromarray(frame.astype('uint8')).convert('RGB')
-    width, height = img.size
-    
-    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+def render_chroma_frame(t, ayahs_timeline, info_text, hook_text, cta_text, w, h):
+    """إنشاء فريم كروما سوداء نقي ومستقر ومحقون بالنصوص مباشرة"""
+    # إنشاء خلفية سوداء تماماً بأبعاد الطول (Reels) القياسية
+    img = Image.new('RGB', (w, h), (0, 0, 0))
+    draw = ImageDraw.Draw(img)
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     
     try:
-        font_sub = ImageFont.truetype(font_path, int(width * 0.038))
-        font_hook = ImageFont.truetype(font_path, int(width * 0.045))
-        font_quran = ImageFont.truetype(font_path, int(width * 0.052))
+        font_sub = ImageFont.truetype(font_path, int(w * 0.038))
+        font_hook = ImageFont.truetype(font_path, int(w * 0.045))
+        font_quran = ImageFont.truetype(font_path, int(w * 0.052))
     except:
         font_sub = font_hook = font_quran = ImageFont.load_default()
         
-    draw.rectangle([(0, 0), (width, height)], fill=(0, 0, 0, 45))
-    draw.rectangle([(0, height - 180), (width, height)], fill=(0, 0, 0, 110))
-    
+    # 1. رسم النصوص الثابتة والمؤثرة
     fixed_hook = fix_arabic_text(hook_text)
     w_hook = draw.textlength(fixed_hook, font=font_hook)
-    draw.text(((width - w_hook) // 2, int(height * 0.12)), fixed_hook, font=font_hook, fill="#FFD700")
+    draw.text(((w - w_hook) // 2, int(h * 0.12)), fixed_hook, font=font_hook, fill="#FFD700")
     
     fixed_info = fix_arabic_text(info_text)
     w_info = draw.textlength(fixed_info, font=font_sub)
-    draw.text(((width - w_info) // 2, height - 140), fixed_info, font=font_sub, fill="#E0E0E0")
+    draw.text(((w - w_info) // 2, h - 140), fixed_info, font=font_sub, fill="#E0E0E0")
     
     fixed_cta = fix_arabic_text(cta_text)
     w_cta = draw.textlength(fixed_cta, font=font_sub)
-    draw.text(((width - w_cta) // 2, height - 70), fixed_cta, font=font_sub, fill="#00FFCC")
+    draw.text(((w - w_cta) // 2, h - 70), fixed_cta, font=font_sub, fill="#00FFCC")
     
+    # 2. البحث عن الآية التي عليها الدور وعرضها منفردة
     current_ayah_text = ""
     for item in ayahs_timeline:
         if item['start'] <= t <= item['end']:
@@ -167,15 +157,15 @@ def process_video_frame(frame, t, ayahs_timeline, info_text, hook_text, cta_text
                 current_line = [word]
         lines.append(" ".join(current_line))
         
-        y_offset = (height // 2) - (len(lines) * 30)
+        y_offset = (h // 2) - (len(lines) * 30)
         for line in lines:
             fixed_line = fix_arabic_text(line)
             w_line = draw.textlength(fixed_line, font=font_quran)
-            draw.text(((width - w_line) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#8B6508")
-            draw.text(((width - w_line) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
-            y_offset += int(height * 0.075)
+            # رسم توهج نحاسي فخم لإعطاء مظهر جمالي على الخلفية السوداء
+            draw.text(((w - w_line) // 2 + 1, y_offset + 1), fixed_line, font=font_quran, fill="#8B6508")
+            draw.text(((w - w_line) // 2, y_offset), fixed_line, font=font_quran, fill="#FFFFFF")
+            y_offset += int(h * 0.075)
 
-    img.paste(overlay, (0, 0), overlay)
     return np.array(img).astype('uint8')
 
 def generate_video():
@@ -187,48 +177,36 @@ def generate_video():
 
     audio_path, total_duration, ayahs_timeline, info_text, reciter, surah = get_quran_data()
     
-    headers = {'Authorization': PEXELS_API_KEY}
-    params = {'query': random.choice(['mountains', 'river', 'nature', 'rain']), 'per_page': 10, 'orientation': 'portrait'}
-    v_data = requests.get("https://api.pexels.com/videos/search", headers=headers, params=params, timeout=15).json()
-    video_url = random.choice(v_data['videos'])['video_files'][0]['link']
+    # تحديد مقاسات الفيديو الطولي القياسي (720x1280)
+    w, h = 720, 1280
     
-    with open("v_temp.mp4", "wb") as f: 
-        f.write(requests.get(video_url).content)
+    # صناعة الكليب برمجياً بالكامل من دالة الفريمات لضمان أقصى درجات الاستقرار والسرعة
+    final_clip = ColorClip(size=(w, h), color=(0, 0, 0), duration=total_duration)
+    final_clip = final_clip.fl(lambda gf, t: render_chroma_frame(t, ayahs_timeline, info_text, chosen_hook, chosen_cta, w, h))
     
-    video_clip = VideoFileClip("v_temp.mp4")
-    if video_clip.duration < total_duration:
-        loops = int(total_duration // video_clip.duration) + 1
-        from moviepy.editor import concatenate_videoclips
-        video_clip = concatenate_videoclips([video_clip] * loops).subclip(0, total_duration)
-    else:
-        video_clip = video_clip.subclip(0, total_duration)
-
-    def make_frame_at_t(get_frame, t):
-        return process_video_frame(get_frame(t), t, ayahs_timeline, info_text, chosen_hook, chosen_cta)
-
-    final_clip = video_clip.fl(make_frame_at_t)
+    # دمج كليب الصوت الذي تم تحميله بنجاح
     final_clip = final_clip.set_audio(AudioFileClip(audio_path))
 
     output_filename = "quran_final_pro.mp4"
     final_clip.write_videofile(output_filename, fps=24, codec="libx264", audio_codec="aac", threads=4, logger=None)
     
     final_clip.close()
-    video_clip.close()
     
+    # إرسال كود المونتاج الاحترافي الصافي إلى التليجرام
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
     with open(output_filename, 'rb') as video_file:
         caption = (
-            f"📖 *تلاوة خاشعة يومية متزامنة* 📖\n\n"
+            f"📖 *تلاوة خاشعة - كروما سوداء سينمائية* 📖\n\n"
             f"🎙️ القارئ: #{reciter.replace(' ', '_')}\n"
             f"🕌 سورة: #{surah.replace(' ', '_')}\n\n"
             f"◽ ◽ ◽ ◽ ◽ ◽ ◽\n"
             f"📣 {chosen_cta}\n\n"
-            f"✨ مونتاج آلي متزامن واحترافي تماماً بدون أخطاء | خادمكم: {YOUR_NAME}"
+            f"✨ تصميم كروما أسود فاخر وخالي من الأخطاء | خادمكم: {YOUR_NAME}"
         )
         requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'video': video_file})
         
     time.sleep(2)
-    for file in ["v_temp.mp4", "final.mp3", output_filename]:
+    for file in ["final.mp3", output_filename]:
         if os.path.exists(file): 
             os.remove(file)
 
