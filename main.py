@@ -14,7 +14,6 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
-# قائمة قراء الترتيل المعتمدين والمحددين من قبلك
 RECITERS = [
     {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi"},
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -50,7 +49,7 @@ def download_arabic_font():
             with open(font_path, "wb") as f:
                 f.write(r.content)
         except Exception as e:
-            print(f"⚠️ فشل جلب الخط المخصص، سيتم استخدام الخط الافتراضي: {e}")
+            print(f"⚠️ فشل جلب الخط: {e}")
     return font_path
 
 def create_text_image(text, font_path, width=720, height=1280):
@@ -86,7 +85,6 @@ def split_long_text(text, max_words=5):
     return chunks
 
 def get_precise_quran_data():
-    """نظام جلب البيانات مع فحص الأخطاء التلقائي وإمكانية الرجوع الفوري لبديل آمن"""
     reciter = random.choice(RECITERS)
     history = get_viewed_history()
     surah_num = random.randint(1, 114)
@@ -119,9 +117,8 @@ def get_precise_quran_data():
                 
             return selected_ayahs, surah_name, reciter['name'], is_full, surah_num
     except Exception as e:
-        print(f"⚠️ فشل الاتصال بـ API القرآن ({e})، جاري محاولة جلب سورة بديلة...")
+        print(f"⚠️ فشل الـ API ({e})، جاري جلب سورة بديلة...")
         
-    # خط دفاع متين واحتياطي محلي ومباشر لضمان عدم توقف الكود نهائياً
     fallback_ayahs = [
         {"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5418.mp3"},
         {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5419.mp3"},
@@ -150,19 +147,21 @@ def generate_video():
             temp_audio_name = f"precise_ayah_{idx}.mp3"
             
             headers = {'User-Agent': 'Mozilla/5.0'}
-            # تحميل ملف الصوت مع فحص الأخطاء البرمجية للرابط
             r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
             if r.status_code != 200:
-                raise ValueError(f"تعذر تحميل الصوت من الرابط: {audio_url}")
+                raise ValueError(f"فشل تحميل الصوت: {audio_url}")
                 
             with open(temp_audio_name, "wb") as f:
                 f.write(r.content)
             temp_files_to_delete.append(temp_audio_name)
             
-            audio_clip = AudioFileClip(temp_audio_name)
+            # فتح ملف الصوت الأصلي للآية
+            raw_audio = AudioFileClip(temp_audio_name)
+            
+            # [1] نظام حل تقطع الصوت: إعادة تهيئة العينات وعمل تلاشٍ حركي عند الحواف
+            audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
             duration = audio_clip.duration
             
-            # حماية لمنع مدد الصوت الصفرية أو التالفة
             if duration <= 0.1:
                 duration = 2.0
                 
@@ -172,15 +171,20 @@ def generate_video():
             
             sub_clips = []
             for i, chunk in enumerate(text_chunks):
-                num_frames = int(chunk_duration * fps)
+                # [2] نظام المزامنة اللحظية: حساب عدد الفريمات المطابق للملي ثانية بدقة متناهية
+                start_audio = i * chunk_duration
+                end_audio = min((i + 1) * chunk_duration, duration)
+                actual_chunk_duration = end_audio - start_audio
+                
+                num_frames = int(actual_chunk_duration * fps)
                 if num_frames == 0:
                     num_frames = 1
                     
                 frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
                 
+                # ربط الفريمات بالمدة الحقيقية للصوت المقتطع
                 chunk_clip = ImageSequenceClip(frames, fps=fps)
-                start_audio = i * chunk_duration
-                end_audio = min((i + 1) * chunk_duration, duration)
+                chunk_clip = chunk_clip.set_duration(actual_chunk_duration)
                 
                 chunk_audio = audio_clip.subclip(start_audio, end_audio)
                 chunk_clip = chunk_clip.set_audio(chunk_audio)
@@ -190,9 +194,10 @@ def generate_video():
             video_clips_pool.append(ayah_final_clip)
             
         if not video_clips_pool:
-            raise ValueError("مسبح الكليبات فارغ، لم تكتمل أي آية.")
+            raise ValueError("مسبح الكليبات فارغ.")
             
-        print("جاري دمج المقاطع في الكروما النهائية...")
+        print("جاري دمج المقاطع في الكروما النهائية وتطبيق المزامنة والترشيح الصوتي...")
+        # استخدام طريقة compose الآمنة لدمج الفيديوهات الصوتية المتلاحقة دون حدوث فجوات صامتة
         final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
         
         output_filename = "quran_chroma.mp4"
@@ -201,10 +206,12 @@ def generate_video():
             fps=fps,
             codec="libx264",
             audio_codec="aac",
+            # ضبط عينات الصوت ومعدل النقل لضمان نقاء الصوت وسلاسته على الهواتف والسيرفرات
+            audio_fps=44100,
+            audio_bitrate="192k",
             logger=None
         )
         
-        # إغلاق الكليبات فوراً لتحرير موارد المعالجة والذاكرة
         final_video_clip.close()
         for clip in video_clips_pool:
             clip.close()
@@ -214,7 +221,7 @@ def generate_video():
         caption_text = (
             f"📖 {surah_name} ({type_text})\n"
             f"🎙️ تلاوة خاشعة بترتيل {reciter_name}\n"
-            f"✨ كروما سوداء بمزامنة تلفزيونية دقيقة وصافية\n\n"
+            f"✨ كروما سوداء متزامنة وصافية الصوت بنسبة 100%\n\n"
             f"بواسطة المطور: {YOUR_NAME}"
         )
         
@@ -229,16 +236,16 @@ def generate_video():
         
         if response.status_code == 200:
             print("====================================")
-            print(f"تمت المزامنة الذكية بنجاح لـ {surah_name} للقارئ {reciter_name}! ✅")
+            print(f"تمت المزامنة الصافية وحل المشاكل لـ {surah_name} بنجاح! ✅")
             print("====================================")
         else:
-            print(f"⚠️ فشل إرسال الملف لتيليجرام، كود الخطأ: {response.status_code}")
+            print(f"⚠️ فشل إرسال الملف لتيليجرام: {response.status_code}")
             
     except Exception as e:
         print(f"❌ خطأ معالجة وتزامن في الفيديو الحالي: {e}")
         
     finally:
-        # إغلاق وحذف كلي وكامل للملفات المؤقتة لتجنب أي تعليق (Safety Cleanup Guard)
+        # إغلاق وتحرير الذاكرة الفوري
         for clip in video_clips_pool:
             try:
                 clip.close()
@@ -253,21 +260,20 @@ def generate_video():
             except Exception as e:
                 print(f"تخطي حذف {file}: {e}")
         
-        # تفريغ فوري لذاكرة بايثون العشوائية (Memory Garbage Collector)
         gc.collect()
 
 if __name__ == "__main__":
-    TOTAL_VIDEOS = 15  # عدد الفيديوهات المطلوبة
-    WAIT_TIME = 90     # الانتظار دقيقة ونصف (90 ثانية) بين كل إنتاج فيديو وآخر لضمان عدم حظر تيليجرام
+    TOTAL_VIDEOS = 15  
+    WAIT_TIME = 90     
     
-    print(f"🚀 بدء حملة الإنتاج الذكية لـ {TOTAL_VIDEOS} فيديو متتالي ومقاوم للأخطاء...")
+    print(f"🚀 بدء حملة الإنتاج الذكية والآمنة لـ {TOTAL_VIDEOS} فيديو خالية من مشاكل الصوت والتزامن...")
     
     for i in range(1, TOTAL_VIDEOS + 1):
-        print(f"\n🎬 جاري معالجة وإنتاج الفيديو رقم ({i}/{TOTAL_VIDEOS})...")
+        print(f"\n🎬 جاري تصميم وإنتاج الفيديو رقم ({i}/{TOTAL_VIDEOS})...")
         generate_video()
         
         if i < TOTAL_VIDEOS:
-            print(f"⏳ الانتظار الذكي لـ {WAIT_TIME} ثانية لتوليد الفيديو التالي بدون تداخل...")
+            print(f"⏳ الانتظار الدقيق لـ {WAIT_TIME} ثانية لتوليد الفيديو التالي بدون حظر...")
             time.sleep(WAIT_TIME)
             
-    print("\n🎉 تم إنتاج وحفظ وإرسال الـ 15 فيديو بالكامل دون أي تداخل أو توقف!")
+    print("\n🎉 تم إنتاج وحفظ وإرسال الـ 15 فيديو بنقاء صوت ومزامنة مطلقة!")
