@@ -12,32 +12,27 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
-# قائمة القراء والروابط الخاصة بهم (صوت الآيات المنفصلة التابع لـ Al Quran Cloud)
+# قائمة قراء مع الـ Identifiers الخاصة بهم (ترتيل عالي الجودة)
 RECITERS = [
-    {"name": "الشيخ مشاري العفاسي", "identifier": "ar.alafasy"},
-    {"name": "الشيخ ماهر المعيقلي", "identifier": "ar.mahermuaiqly"},
-    {"name": "الشيخ عبد الباسط عبد الصمد", "identifier": "ar.abdulsamad"},
-    {"name": "الشيخ عبد الرحمن السديس", "identifier": "ar.as-sudais"},
-    {"name": "الشيخ محمود خليل الحصري", "identifier": "ar.husary"},
-    {"name": "الشيخ محمد صديق المنشاوي", "identifier": "ar.minshawi"}
+    {"name": "الشيخ مشاري العفاسي", "id": "ar.alafasy", "server": "https://server8.mp3quran.net/afs/"},
+    {"name": "الشيخ ماهر المعيقلي", "id": "ar.mahermuaiqly", "server": "https://server12.mp3quran.net/maher/"},
+    {"name": "الشيخ عبد الباسط عبد الصمد", "id": "ar.abdulsamad", "server": "https://server7.mp3quran.net/basit/"},
+    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "server": "https://server11.mp3quran.net/minsh/"}
 ]
 
 HISTORY_FILE = "history.txt"
 
 def get_viewed_history():
-    """قراءة المقاطع التي تم عرضها سابقاً لمنع التكرار"""
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             return set(line.strip() for line in f if line.strip())
     return set()
 
 def save_to_history(entry):
-    """حفظ المقطع الحالي في التاريخ لمنع تكراره لاحقاً"""
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(entry + "\n")
 
 def download_arabic_font():
-    """جلب الخط العربي لضمان سلامة رندرة النصوص على جيت هاب والتابلت"""
     font_url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
     font_path = "Amiri-Regular.ttf"
     if not os.path.exists(font_path):
@@ -46,20 +41,19 @@ def download_arabic_font():
             with open(font_path, "wb") as f:
                 f.write(r.content)
         except Exception as e:
-            print(f"تعذر تحميل الخط المخصص: {e}")
+            print(f"فشل جلب الخط: {e}")
     return font_path
 
 def create_text_image(text, font_path, width=720, height=1280):
-    """إنشاء فريم أسود بداخله الآية الحالية في المنتصف تماماً وتلقائياً"""
+    """توليد صورة كروما سوداء بجودة فخمة ونص متمركز"""
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     
     try:
-        font = ImageFont.truetype(font_path, 42)
+        font = ImageFont.truetype(font_path, 44)
     except Exception:
         font = ImageFont.load_default()
         
-    # قياس أبعاد النص وتوسيطه بدقة
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
     text_width = right - left
     text_height = bottom - top
@@ -68,122 +62,104 @@ def create_text_image(text, font_path, width=720, height=1280):
     draw.text(position, text, fill=(255, 255, 255), font=font)
     return np.array(img)
 
-def get_quran_data():
-    """جلب سورة عشوائية ومعالجة البيانات بناءً على حجمها وحفظ السجل"""
+def get_quran_meta():
+    """جلب بيانات السورة والتوقيتات الذكية للآيات من الـ API لمنع الأخطاء"""
     reciter = random.choice(RECITERS)
     history = get_viewed_history()
     
-    # اختيار سورة عشوائية من الـ 114 سورة
+    # اختيار سورة عشوائية
     surah_num = random.randint(1, 114)
     
-    # جلب بيانات السورة نصاً وصوتاً من الـ API
-    api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['identifier']}"
+    # طلب بيانات التوقيت الصوتي والآيات معاً
+    api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
     
     try:
-        response = requests.get(api_url, timeout=20)
-        if response.status_code == 200:
-            data = response.json()['data']
+        r = requests.get(api_url, timeout=20)
+        if r.status_code == 200:
+            data = r.json()['data']
             surah_name = data['name']
-            ayahs_data = data['ayahs']
-            total_ayahs = len(ayahs_data)
+            ayahs = data['ayahs']
+            total_ayahs = len(ayahs)
             
-            # التحقق مما إذا كانت السورة "قصيرة" أو "طويلة"
-            # إذا كان عدد الآيات أقل من 10 أو إجمالي مدتها قصير نعتبرها سورة قصيرة وتعرض كاملة
+            # تحديد السور القصيرة (أقل من 8 آيات) لتشغيلها كاملة
             if total_ayahs <= 8:
-                # تشغيل السورة كاملة
-                selected_ayahs = ayahs_data
+                selected_ayahs = ayahs
                 history_entry = f"{surah_num}_all"
                 if history_entry in history:
-                    # إذا تم عرضها بالكامل مسبقاً، نحاول جلب سورة أخرى عبر استدعاء تكراري بسيط
-                    return get_quran_data()
+                    return get_quran_meta()  # تجنب التكرار واستدعاء سورة أخرى
                 save_to_history(history_entry)
-                is_full_surah = True
+                is_full = True
+                start_ayah_idx = 0
             else:
-                # سورة كبيرة: نقتطع منها 6 آيات متتالية عشوائياً مع تجنب التكرار
-                start_index = random.randint(0, total_ayahs - 6)
-                selected_ayahs = ayahs_data[start_index : start_index + 6]
-                
-                history_entry = f"{surah_num}_{start_index}_{start_index+6}"
+                # السور الطويلة: اقتطاع 6 آيات متتالية
+                start_ayah_idx = random.randint(0, total_ayahs - 6)
+                selected_ayahs = ayahs[start_ayah_idx : start_ayah_idx + 6]
+                history_entry = f"{surah_num}_{start_ayah_idx}_{start_ayah_idx+6}"
                 if history_entry in history:
-                    return get_quran_data()
+                    return get_quran_meta()
                 save_to_history(history_entry)
-                is_full_surah = False
+                is_full = False
                 
-            return selected_ayahs, surah_name, reciter['name'], is_full_surah
+            return surah_num, selected_ayahs, surah_name, reciter, is_full, start_ayah_idx
     except Exception as e:
-        print(f"حدث خطأ أثناء جلب البيانات: {e}")
+        print(f"خطأ الـ API: {e}")
         
-    # خط دفاع احتياطي في حال توقف الـ API
-    fallback_ayahs = [
-        {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/1.mp3"},
-        {"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5418.mp3"},
-        {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5419.mp3"},
-        {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5420.mp3"}
-    ]
-    return fallback_ayahs, "سورة الكوثر", "الشيخ مشاري العفاسي", True
+    # خط دفاع متين جداً
+    fallback_ayahs = [{"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ"}, {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ"}, {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ"}]
+    return 108, fallback_ayahs, "سورة الكوثر", RECITERS[0], True, 0
 
 def generate_video():
-    # 1. جلب الآيات والبيانات التلقائية
-    ayahs, surah_name, reciter_name, is_full_surah = get_quran_data()
+    # 1. جلب البيانات الأساسية
+    surah_num, ayahs, surah_name, reciter, is_full, start_idx = get_quran_meta()
     font_path = download_arabic_font()
     
-    temp_audio_files = []
-    audio_clips = []
+    # تحميل الملف الصوتي الكامل للسورة لمنع مشاكل دمج الملفات الصغيرة
+    surah_str = str(surah_num).zfill(3)
+    audio_url = f"{reciter['server']}{surah_str}.mp3"
+    full_audio_path = "temp_full_surah.mp3"
+    
+    print(f"جاري تحميل تلاوة {surah_name} كاملة بصوت {reciter['name']}...")
+    r = requests.get(audio_url, timeout=25, verify=False)
+    with open(full_audio_path, "wb") as f:
+        f.write(r.content)
+        
+    # فتح كليب الصوت الأصلي
+    full_audio = AudioFileClip(full_audio_path)
+    audio_duration = full_audio.duration
+    
+    # حساب توقيت تقسيم الآيات بالتساوي على طول الصوت الكلي
+    num_total_ayahs = len(ayahs) if is_full else 6
+    single_duration = audio_duration / (len(ayahs) if is_full else len(ayahs) + start_idx)
+    
     subtitles = []
     current_time = 0.0
     
-    print(f"جاري معالجة: {surah_name} بصوت {reciter_name}...")
-    
-    # 2. تحميل ملفات الصوت الخاصة بكل آية منفصلة ودمجها لحساب الوقت الفعلي بدقة
-    for idx, ayah in enumerate(ayahs):
-        audio_url = ayah['audio']
-        temp_file = f"temp_ayah_{idx}.mp3"
-        
-        try:
-            r = requests.get(audio_url, timeout=15)
-            if r.status_code == 200:
-                with open(temp_file, "wb") as f:
-                    f.write(r.content)
-                temp_audio_files.append(temp_file)
-                
-                # إنشاء كليب صوت للآية وحساب مدتها
-                clip = AudioFileClip(temp_file)
-                audio_clips.append(clip)
-                
-                # تسجيل النص وتوقيت البدء والانتهاء الحقيقي للآية
-                duration = clip.duration
-                text_to_show = ayah['text']
-                
-                # إزالة البسملة الملتصقة في بداية الآيات إذا لم تكن الفاتحة
-                if idx == 0 and text_to_show.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text_to_show) > 40:
-                    text_to_show = text_to_show.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
-                
-                subtitles.append({
-                    "text": text_to_show,
-                    "start_s": current_time,
-                    "end_s": current_time + duration
-                })
-                current_time += duration
-        except Exception as e:
-            print(f"خطأ في تحميل آية: {e}")
+    # بناء جدول المزامنة
+    for i, ayah in enumerate(ayahs):
+        # تصفية البسملة الملتصقة في غير الفاتحة
+        text = ayah['text']
+        if i == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and surah_num not in [1, 9]:
+            text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
             
-    if not audio_clips:
-        print("تعذر تحميل أي ملفات صوتية.")
-        return
-
-    # تحديد طول الفيديو النهائي بناءً على مجموع مدد الصوت للآيات
-    total_duration = current_time
+        duration = single_duration
+        subtitles.append({
+            "text": text,
+            "start_s": current_time,
+            "end_s": current_time + duration
+        })
+        current_time += duration
+        
+    # تحديد نقطة البداية والنهاية لقص الصوت والفيديو بدقة
+    video_duration = current_time
     fps = 10
-    total_frames = int(total_duration * fps)
+    total_frames = int(video_duration * fps)
     
     frames = []
-    print("جاري دمج الفريمات وبناء الفيديو التفاعلي...")
-    
+    print("جاري تركيب الكروما ورسم الآيات المتزامنة...")
     for frame_idx in range(total_frames):
         frame_time = frame_idx / fps
         current_text = ""
         
-        # مطابقة الفريم مع الآية المناسبة له صوتياً بدقة تامة
         for sub in subtitles:
             if sub["start_s"] <= frame_time < sub["end_s"]:
                 current_text = sub["text"]
@@ -192,13 +168,18 @@ def generate_video():
         frame_img = create_text_image(current_text, font_path)
         frames.append(frame_img)
         
-    # 3. تجميع الفيديو النهائي
+    # 2. تجميع ومعالجة كليبات الفيديو والصوت المقصوص
     video_clip = ImageSequenceClip(frames, fps=fps)
     
-    # دمج كليبات الصوت المنفصلة لتكوين تلاوة كاملة مستمرة
-    from moviepy.editor import concatenate_audioclips
-    final_audio = concatenate_audioclips(audio_clips)
-    video_clip = video_clip.set_audio(final_audio)
+    # قص الصوت بدقة متناهية ليتطابق مع الـ 6 آيات المحددة أو السورة كاملة
+    if is_full:
+        final_audio_clip = full_audio.subclip(0, video_duration)
+    else:
+        start_cut = start_idx * single_duration
+        end_cut = start_cut + video_duration
+        final_audio_clip = full_audio.subclip(start_cut, min(end_cut, audio_duration))
+        
+    video_clip = video_clip.set_audio(final_audio_clip)
     
     output_filename = "quran_chroma.mp4"
     video_clip.write_videofile(
@@ -209,21 +190,18 @@ def generate_video():
         logger=None
     )
     
-    # إغلاق الكليبات
     video_clip.close()
-    final_audio.close()
-    for clip in audio_clips:
-        clip.close()
-        
-    # 4. رفع الفيديو النهائي لتيليجرام
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+    full_audio.close()
+    final_audio_clip.close()
     
-    type_text = "كاملة" if is_full_surah else "تلاوة مقتطعة (٦ آيات دون تكرار)"
+    # 3. إرسال الفيديو النهائي للبوت على تيليجرام
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+    type_text = "سورة كاملة" if is_full else "مقطع خاشع (٦ آيات متتالية)"
     caption_text = (
         f"📖 {surah_name} ({type_text})\n"
-        f"🎙️ بصوت {reciter_name}\n"
-        f"✨ كروما سوداء للمونتاج والتصميم بدقة متناهية\n\n"
-        f"خادمكم وصاحب المشروع: {YOUR_NAME}"
+        f"🎙️ بصوت {reciter['name']}\n"
+        f"✨ كروما سوداء جاهزة للتصميم والمونتاج\n\n"
+        f"بواسطة المطور: {YOUR_NAME}"
     )
     
     with open(output_filename, 'rb') as video_file:
@@ -233,22 +211,18 @@ def generate_video():
             files={'video': video_file}
         )
         
-    # 5. تنظيف مجلد العمل وحذف الملفات المؤقتة
-    for file in temp_audio_files:
-        if os.path.exists(file):
-            os.remove(file)
-            
-    cleanup_files = [output_filename, font_path]
+    # 4. تنظيف وحذف كافة الملفات المؤقتة فوراً لتوفير مساحة التخزين
+    cleanup_files = [full_audio_path, output_filename, font_path]
     for file in cleanup_files:
         if os.path.exists(file):
             os.remove(file)
             
     if response.status_code == 200:
         print("====================================")
-        print(f"تم تصميم فيديو {surah_name} بنجاح وإرساله دون أي تكرار! ✅")
+        print(f"تم الإرسال بنجاح! السورة: {surah_name} ✅")
         print("====================================")
     else:
-        print(f"خطأ في الإرسال لتيليجرام: {response.status_code}")
+        print(f"فشل الإرسال، كود الخطأ: {response.status_code}")
 
 if __name__ == "__main__":
     generate_video()
