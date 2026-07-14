@@ -99,7 +99,10 @@ def get_precise_quran_data():
             ayahs = data['ayahs']
             total_ayahs = len(ayahs)
             
-            if total_ayahs <= 8:
+            # لإنتاج فيديو مدته دقيقة تقريباً، نقوم بسحب عدد آيات أكبر (من 10 إلى 15 آية)
+            target_count = random.randint(10, 15)
+            
+            if total_ayahs <= target_count:
                 selected_ayahs = ayahs
                 history_entry = f"{surah_num}_all_{reciter['id']}"
                 if history_entry in history:
@@ -107,9 +110,9 @@ def get_precise_quran_data():
                 save_to_history(history_entry)
                 is_full = True
             else:
-                start_ayah_idx = random.randint(0, total_ayahs - 6)
-                selected_ayahs = ayahs[start_ayah_idx : start_ayah_idx + 6]
-                history_entry = f"{surah_num}_{start_ayah_idx}_{start_ayah_idx+6}_{reciter['id']}"
+                start_ayah_idx = random.randint(0, total_ayahs - target_count)
+                selected_ayahs = ayahs[start_ayah_idx : start_ayah_idx + target_count]
+                history_entry = f"{surah_num}_{start_ayah_idx}_{start_ayah_idx+target_count}_{reciter['id']}"
                 if history_entry in history:
                     return get_precise_quran_data()
                 save_to_history(history_entry)
@@ -155,10 +158,9 @@ def generate_video():
                 f.write(r.content)
             temp_files_to_delete.append(temp_audio_name)
             
-            # فتح ملف الصوت الأصلي للآية
             raw_audio = AudioFileClip(temp_audio_name)
             
-            # [1] نظام حل تقطع الصوت: إعادة تهيئة العينات وعمل تلاشٍ حركي عند الحواف
+            # نظام معالجة تقطع الصوت والتلاشي الذكي
             audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
             duration = audio_clip.duration
             
@@ -171,7 +173,7 @@ def generate_video():
             
             sub_clips = []
             for i, chunk in enumerate(text_chunks):
-                # [2] نظام المزامنة اللحظية: حساب عدد الفريمات المطابق للملي ثانية بدقة متناهية
+                # نظام المزامنة اللحظية الحسابية
                 start_audio = i * chunk_duration
                 end_audio = min((i + 1) * chunk_duration, duration)
                 actual_chunk_duration = end_audio - start_audio
@@ -182,7 +184,6 @@ def generate_video():
                     
                 frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
                 
-                # ربط الفريمات بالمدة الحقيقية للصوت المقتطع
                 chunk_clip = ImageSequenceClip(frames, fps=fps)
                 chunk_clip = chunk_clip.set_duration(actual_chunk_duration)
                 
@@ -197,7 +198,6 @@ def generate_video():
             raise ValueError("مسبح الكليبات فارغ.")
             
         print("جاري دمج المقاطع في الكروما النهائية وتطبيق المزامنة والترشيح الصوتي...")
-        # استخدام طريقة compose الآمنة لدمج الفيديوهات الصوتية المتلاحقة دون حدوث فجوات صامتة
         final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
         
         output_filename = "quran_chroma.mp4"
@@ -206,7 +206,6 @@ def generate_video():
             fps=fps,
             codec="libx264",
             audio_codec="aac",
-            # ضبط عينات الصوت ومعدل النقل لضمان نقاء الصوت وسلاسته على الهواتف والسيرفرات
             audio_fps=44100,
             audio_bitrate="192k",
             logger=None
@@ -217,7 +216,7 @@ def generate_video():
             clip.close()
             
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-        type_text = "سورة كاملة" if is_full else "6 آيات متزامنة"
+        type_text = "تلاوة كاملة" if is_full else "مقطع خاشع مدة دقيقة"
         caption_text = (
             f"📖 {surah_name} ({type_text})\n"
             f"🎙️ تلاوة خاشعة بترتيل {reciter_name}\n"
@@ -245,7 +244,6 @@ def generate_video():
         print(f"❌ خطأ معالجة وتزامن في الفيديو الحالي: {e}")
         
     finally:
-        # إغلاق وتحرير الذاكرة الفوري
         for clip in video_clips_pool:
             try:
                 clip.close()
@@ -263,17 +261,17 @@ def generate_video():
         gc.collect()
 
 if __name__ == "__main__":
-    TOTAL_VIDEOS = 15  
-    WAIT_TIME = 90     
+    TOTAL_VIDEOS = 5   # تم التعديل إلى 5 فيديوهات دفعة واحدة
+    WAIT_TIME = 60     # وقت الانتظار دقيقة واحدة (60 ثانية) بين كل فيديو والتالي
     
-    print(f"🚀 بدء حملة الإنتاج الذكية والآمنة لـ {TOTAL_VIDEOS} فيديو خالية من مشاكل الصوت والتزامن...")
+    print(f"🚀 بدء حملة الإنتاج الذكية لـ {TOTAL_VIDEOS} فيديوهات (مدة كل فيديو دقيقة تقريباً)...")
     
     for i in range(1, TOTAL_VIDEOS + 1):
         print(f"\n🎬 جاري تصميم وإنتاج الفيديو رقم ({i}/{TOTAL_VIDEOS})...")
         generate_video()
         
         if i < TOTAL_VIDEOS:
-            print(f"⏳ الانتظار الدقيق لـ {WAIT_TIME} ثانية لتوليد الفيديو التالي بدون حظر...")
+            print(f"⏳ الانتظار الدقيق لـ {WAIT_TIME} ثانية (دقيقة واحدة) قبل توليد الفيديو التالي...")
             time.sleep(WAIT_TIME)
             
-    print("\n🎉 تم إنتاج وحفظ وإرسال الـ 15 فيديو بنقاء صوت ومزامنة مطلقة!")
+    print("\n🎉 تم إنتاج وإرسال الـ 5 فيديوهات بنجاح ومزامنة كاملة!")
