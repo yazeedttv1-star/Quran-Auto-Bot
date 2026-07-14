@@ -2,6 +2,7 @@ import os
 import random
 import requests
 import numpy as np
+import time
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import AudioFileClip, ImageSequenceClip, concatenate_videoclips
 
@@ -48,7 +49,6 @@ def create_text_image(text, font_path, width=720, height=1280):
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
-        # حجم خط كبير ومثالي للقراءة المريحة على الهواتف
         font = ImageFont.truetype(font_path, 48)
     except Exception:
         font = ImageFont.load_default()
@@ -62,7 +62,6 @@ def create_text_image(text, font_path, width=720, height=1280):
     return np.array(img)
 
 def split_long_text(text, max_words=5):
-    """تقسيم الآية الطويلة إلى أجزاء صغيرة (عبارات فخمة) لتبسيط ظهورها على الشاشة تلقائياً"""
     words = text.split()
     if len(words) <= max_words:
         return [text]
@@ -133,8 +132,8 @@ def generate_video():
     
     for idx, ayah in enumerate(ayahs):
         text = ayah['text']
-        if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
-            text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
+        if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
+            text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
             
         audio_url = ayah['audio']
         temp_audio_name = f"precise_ayah_{idx}.mp3"
@@ -148,22 +147,19 @@ def generate_video():
         audio_clip = AudioFileClip(temp_audio_name)
         duration = audio_clip.duration
         
-        # تقسيم الآية الطويلة إلى عبارات لتظهر بالتتابع مع الصوت وبخط كبير ممتاز
         text_chunks = split_long_text(text, max_words=5)
         num_chunks = len(text_chunks)
-        chunk_duration = duration / num_chunks  # توزيع وقت قراءة الآية بالتساوي على كلماتها/جملها
+        chunk_duration = duration / num_chunks
         
         sub_clips = []
         for i, chunk in enumerate(text_chunks):
             num_frames = int(chunk_duration * fps)
-            # تجنب الفريمات الصفرية في المقاطع شديدة القصر
             if num_frames == 0:
                 num_frames = 1
                 
             frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
             
             chunk_clip = ImageSequenceClip(frames, fps=fps)
-            # قطع الجزء الصوتي المقابل للكلمة/العبارة الحالية من ملف صوت الآية الكاملة
             start_audio = i * chunk_duration
             end_audio = min((i + 1) * chunk_duration, duration)
             
@@ -171,7 +167,6 @@ def generate_video():
             chunk_clip = chunk_clip.set_audio(chunk_audio)
             sub_clips.append(chunk_clip)
             
-        # دمج الأجزاء الصغيرة للآية الواحدة تلو الأخرى
         ayah_final_clip = concatenate_videoclips(sub_clips, method="compose")
         video_clips_pool.append(ayah_final_clip)
         
@@ -196,7 +191,7 @@ def generate_video():
         clip.close()
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-    type_text = "سورة كاملة" if is_full else "٦ آيات متزامنة"
+    type_text = "سورة كاملة" if is_full else "6 آيات متزامنة"
     caption_text = (
         f"📖 {surah_name} ({type_text})\n"
         f"🎙️ بصوت {reciter_name}\n"
@@ -229,4 +224,22 @@ def generate_video():
         print(f"فشل إرسال المقطع لتيليجرام، كود الخطأ: {response.status_code}")
 
 if __name__ == "__main__":
-    generate_video()
+    TOTAL_VIDEOS = 15  # عدد الفيديوهات المطلوب إنتاجها
+    WAIT_TIME = 90     # وقت الانتظار بالثواني (دقيقة ونصف)
+
+    print(f"🚀 بدء تشغيل الحملة لإنتاج {TOTAL_VIDEOS} فيديو متتالي...")
+
+    for i in range(1, TOTAL_VIDEOS + 1):
+        print(f"\n🎬 جاري معالجة وإنتاج الفيديو رقم ({i}/{TOTAL_VIDEOS})...")
+        try:
+            generate_video()
+            print(f"✅ تم الانتهاء من إرسال الفيديو رقم {i} بنجاح.")
+        except Exception as e:
+            print(f"❌ حدث خطأ غير متوقع أثناء معالجة الفيديو رقم {i}: {e}")
+
+        # الانتظار دقيقة ونصف قبل الانتقال للفيديو التالي (ما عدا الفيديو الأخير)
+        if i < TOTAL_VIDEOS:
+            print(f"⏳ الانتظار لمدة دقيقة ونصف ({WAIT_TIME} ثانية) لتجنب حظر التيليجرام وللجدولة...")
+            time.sleep(WAIT_TIME)
+
+    print("\n🎉 انتهت الحملة بالكامل وتم إرسال الـ 15 فيديو بنجاح!")
