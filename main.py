@@ -12,7 +12,6 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
-# قائمة القراء المعتمدين في نظام الآيات المزامنة عبر سرفرات التوزيع العالمية
 RECITERS = [
     {"name": "الشيخ مشاري العفاسي", "id": "ar.alafasy"},
     {"name": "الشيخ ماهر المعيقلي", "id": "ar.mahermuaiqly"},
@@ -49,7 +48,8 @@ def create_text_image(text, font_path, width=720, height=1280):
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(font_path, 42)
+        # حجم خط كبير ومثالي للقراءة المريحة على الهواتف
+        font = ImageFont.truetype(font_path, 48)
     except Exception:
         font = ImageFont.load_default()
         
@@ -60,6 +60,23 @@ def create_text_image(text, font_path, width=720, height=1280):
     position = ((width - text_width) // 2, (height - text_height) // 2)
     draw.text(position, text, fill=(255, 255, 255), font=font)
     return np.array(img)
+
+def split_long_text(text, max_words=5):
+    """تقسيم الآية الطويلة إلى أجزاء صغيرة (عبارات فخمة) لتبسيط ظهورها على الشاشة تلقائياً"""
+    words = text.split()
+    if len(words) <= max_words:
+        return [text]
+    
+    chunks = []
+    current_chunk = []
+    for word in words:
+        current_chunk.append(word)
+        if len(current_chunk) >= max_words:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
 
 def get_precise_quran_data():
     reciter = random.choice(RECITERS)
@@ -92,7 +109,7 @@ def get_precise_quran_data():
                 save_to_history(history_entry)
                 is_full = False
                 
-            return selected_ayahs, surah_name, reciter['name'], is_full
+            return selected_ayahs, surah_name, reciter['name'], is_full, surah_num
     except Exception as e:
         print(f"خطأ الـ API: {e}")
         
@@ -101,10 +118,10 @@ def get_precise_quran_data():
         {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5419.mp3"},
         {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5420.mp3"}
     ]
-    return fallback_ayahs, "سورة الكوثر", "الشيخ مشاري العفاسي", True
+    return fallback_ayahs, "سورة الكوثر", "الشيخ مشاري العفاسي", True, 108
 
 def generate_video():
-    ayahs, surah_name, reciter_name, is_full = get_precise_quran_data()
+    ayahs, surah_name, reciter_name, is_full, surah_num = get_precise_quran_data()
     font_path = download_arabic_font()
     
     video_clips_pool = []
@@ -116,40 +133,53 @@ def generate_video():
     
     for idx, ayah in enumerate(ayahs):
         text = ayah['text']
-        # تنظيف البسملة الملتصقة في بداية السور لكي لا تخرب التنسيق
         if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
             text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
             
         audio_url = ayah['audio']
         temp_audio_name = f"precise_ayah_{idx}.mp3"
         
-        # تحميل الملف الصوتي المستقل للآية الحالية
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
         with open(temp_audio_name, "wb") as f:
             f.write(r.content)
         temp_files_to_delete.append(temp_audio_name)
         
-        # فتح ملف الصوت لحساب الطول الفعلي الدقيق للآية الحالية بالثانية
         audio_clip = AudioFileClip(temp_audio_name)
         duration = audio_clip.duration
         
-        # توليد فريمات مخصصة لهذه الآية بناءً على طول صوتها الحقيقي والظهور بدون تداخل
-        num_frames = int(duration * fps)
-        frames = [create_text_image(text, font_path) for _ in range(num_frames)]
+        # تقسيم الآية الطويلة إلى عبارات لتظهر بالتتابع مع الصوت وبخط كبير ممتاز
+        text_chunks = split_long_text(text, max_words=5)
+        num_chunks = len(text_chunks)
+        chunk_duration = duration / num_chunks  # توزيع وقت قراءة الآية بالتساوي على كلماتها/جملها
         
-        # دمج الصوت والصورة للآية الواحدة ككليب مستقل تماماً ومحكم المزامنة
-        sub_video_clip = ImageSequenceClip(frames, fps=fps)
-        sub_video_clip = sub_video_clip.set_audio(audio_clip)
-        
-        video_clips_pool.append(sub_video_clip)
+        sub_clips = []
+        for i, chunk in enumerate(text_chunks):
+            num_frames = int(chunk_duration * fps)
+            # تجنب الفريمات الصفرية في المقاطع شديدة القصر
+            if num_frames == 0:
+                num_frames = 1
+                
+            frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
+            
+            chunk_clip = ImageSequenceClip(frames, fps=fps)
+            # قطع الجزء الصوتي المقابل للكلمة/العبارة الحالية من ملف صوت الآية الكاملة
+            start_audio = i * chunk_duration
+            end_audio = min((i + 1) * chunk_duration, duration)
+            
+            chunk_audio = audio_clip.subclip(start_audio, end_audio)
+            chunk_clip = chunk_clip.set_audio(chunk_audio)
+            sub_clips.append(chunk_clip)
+            
+        # دمج الأجزاء الصغيرة للآية الواحدة تلو الأخرى
+        ayah_final_clip = concatenate_videoclips(sub_clips, method="compose")
+        video_clips_pool.append(ayah_final_clip)
         
     if not video_clips_pool:
         print("خطأ: لم يتم تحميل كليبات صالحة.")
         return
         
-    print("جاري ربط الكليبات الفردية بسلسلة متصلة لا تقبل التداخل...")
-    # ربط الكليبات المستقلة تلو الأخرى برمجياً وبشكل تتابعي تام
+    print("جاري دمج المقاطع في الكروما النهائية...")
     final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
     
     output_filename = "quran_chroma.mp4"
@@ -161,18 +191,16 @@ def generate_video():
         logger=None
     )
     
-    # تحرير وإغلاق كافة قنوات الذاكرة لمنع تعليق النظام (Exit code 1)
     final_video_clip.close()
     for clip in video_clips_pool:
         clip.close()
         
-    # إرسال النتيجة إلى تيليجرام
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-    type_text = "سورة كاملة بالاتساق الفعلي" if is_full else "٦ آيات متزامنة بالملي ثانية بدون تداخل"
+    type_text = "سورة كاملة" if is_full else "٦ آيات متزامنة"
     caption_text = (
         f"📖 {surah_name} ({type_text})\n"
         f"🎙️ بصوت {reciter_name}\n"
-        f"✨ كروما سوداء بمزامنة صوتية حقيقية ومطلقة للآيات\n\n"
+        f"✨ كروما سوداء بمزامنة تلقائية ممتازة للعبارات والآيات الطويلة\n\n"
         f"بواسطة المطور: {YOUR_NAME}"
     )
     
@@ -183,7 +211,6 @@ def generate_video():
             files={'video': video_file}
         )
         
-    # حذف وتنظيف آمن لجميع الملفات المؤقتة والخطوط
     temp_files_to_delete.append(output_filename)
     temp_files_to_delete.append(font_path)
     
@@ -196,7 +223,7 @@ def generate_video():
             
     if response.status_code == 200:
         print("====================================")
-        print(f"تمت المزامنة المطلقة ونشر مقطع {surah_name} بنجاح! ✅")
+        print(f"تمت المزامنة الذكية وتقسيم العبارات بنجاح لـ {surah_name}! ✅")
         print("====================================")
     else:
         print(f"فشل إرسال المقطع لتيليجرام، كود الخطأ: {response.status_code}")
