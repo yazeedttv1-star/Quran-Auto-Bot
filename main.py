@@ -3,7 +3,7 @@ import random
 import requests
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import AudioFileClip, ImageSequenceClip
+from moviepy.editor import AudioFileClip, ImageSequenceClip, concatenate_videoclips
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -12,11 +12,13 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
+# قائمة القراء المعتمدين في نظام الآيات المزامنة عبر سرفرات التوزيع العالمية
 RECITERS = [
-    {"name": "الشيخ مشاري العفاسي", "id": "ar.alafasy", "server": "https://server8.mp3quran.net/afs/"},
-    {"name": "الشيخ ماهر المعيقلي", "id": "ar.mahermuaiqly", "server": "https://server12.mp3quran.net/maher/"},
-    {"name": "الشيخ عبد الباسط عبد الصمد", "id": "ar.abdulsamad", "server": "https://server7.mp3quran.net/basit/"},
-    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "server": "https://server11.mp3quran.net/minsh/"}
+    {"name": "الشيخ مشاري العفاسي", "id": "ar.alafasy"},
+    {"name": "الشيخ ماهر المعيقلي", "id": "ar.mahermuaiqly"},
+    {"name": "الشيخ عبد الباسط عبد الصمد", "id": "ar.abdulsamad"},
+    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary"},
+    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi"}
 ]
 
 HISTORY_FILE = "history.txt"
@@ -59,7 +61,7 @@ def create_text_image(text, font_path, width=720, height=1280):
     draw.text(position, text, fill=(255, 255, 255), font=font)
     return np.array(img)
 
-def get_quran_meta():
+def get_precise_quran_data():
     reciter = random.choice(RECITERS)
     history = get_viewed_history()
     surah_num = random.randint(1, 114)
@@ -78,91 +80,80 @@ def get_quran_meta():
                 selected_ayahs = ayahs
                 history_entry = f"{surah_num}_all"
                 if history_entry in history:
-                    return get_quran_meta()
+                    return get_precise_quran_data()
                 save_to_history(history_entry)
                 is_full = True
-                start_ayah_idx = 0
             else:
                 start_ayah_idx = random.randint(0, total_ayahs - 6)
                 selected_ayahs = ayahs[start_ayah_idx : start_ayah_idx + 6]
                 history_entry = f"{surah_num}_{start_ayah_idx}_{start_ayah_idx+6}"
                 if history_entry in history:
-                    return get_quran_meta()
+                    return get_precise_quran_data()
                 save_to_history(history_entry)
                 is_full = False
                 
-            return surah_num, selected_ayahs, surah_name, reciter, is_full, start_ayah_idx
+            return selected_ayahs, surah_name, reciter['name'], is_full
     except Exception as e:
         print(f"خطأ الـ API: {e}")
         
-    fallback_ayahs = [{"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ"}, {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ"}, {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ"}]
-    return 108, fallback_ayahs, "سورة الكوثر", RECITERS[0], True, 0
+    fallback_ayahs = [
+        {"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5418.mp3"},
+        {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5419.mp3"},
+        {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5420.mp3"}
+    ]
+    return fallback_ayahs, "سورة الكوثر", "الشيخ مشاري العفاسي", True
 
 def generate_video():
-    surah_num, ayahs, surah_name, reciter, is_full, start_idx = get_quran_meta()
+    ayahs, surah_name, reciter_name, is_full = get_precise_quran_data()
     font_path = download_arabic_font()
     
-    surah_str = str(surah_num).zfill(3)
-    audio_url = f"{reciter['server']}{surah_str}.mp3"
-    full_audio_path = "temp_full_surah.mp3"
+    video_clips_pool = []
+    temp_files_to_delete = []
     
-    print(f"جاري تحميل تلاوة {surah_name} بصوت {reciter['name']}...")
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    r = requests.get(audio_url, timeout=25, headers=headers, verify=False)
-    with open(full_audio_path, "wb") as f:
-        f.write(r.content)
-        
-    full_audio = AudioFileClip(full_audio_path)
-    audio_duration = full_audio.duration
+    print(f"جاري معالجة ومزامنة الآيات لـ {surah_name} بصوت {reciter_name}...")
     
-    # حساب مرن وآمن للمدد لتجنب تجاوز طول ملف الـ mp3 الفعلي
-    total_segments = len(ayahs) if is_full else (len(ayahs) + start_idx)
-    single_duration = audio_duration / max(total_segments, 1)
+    fps = 10
     
-    subtitles = []
-    current_time = 0.0
-    
-    for i, ayah in enumerate(ayahs):
+    for idx, ayah in enumerate(ayahs):
         text = ayah['text']
-        if i == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and surah_num not in [1, 9]:
+        # تنظيف البسملة الملتصقة في بداية السور لكي لا تخرب التنسيق
+        if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
             text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
             
-        duration = single_duration
-        subtitles.append({
-            "text": text,
-            "start_s": current_time,
-            "end_s": current_time + duration
-        })
-        current_time += duration
+        audio_url = ayah['audio']
+        temp_audio_name = f"precise_ayah_{idx}.mp3"
         
-    video_duration = current_time
-    fps = 10
-    total_frames = int(video_duration * fps)
-    
-    frames = []
-    for frame_idx in range(total_frames):
-        frame_time = frame_idx / fps
-        current_text = ""
-        for sub in subtitles:
-            if sub["start_s"] <= frame_time < sub["end_s"]:
-                current_text = sub["text"]
-                break
-        frames.append(create_text_image(current_text, font_path))
+        # تحميل الملف الصوتي المستقل للآية الحالية
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
+        with open(temp_audio_name, "wb") as f:
+            f.write(r.content)
+        temp_files_to_delete.append(temp_audio_name)
         
-    video_clip = ImageSequenceClip(frames, fps=fps)
-    
-    # قص الصوت بشكل آمن تماماً ليتطابق مع الفريمات
-    if is_full:
-        final_audio_clip = full_audio.subclip(0, min(video_duration, audio_duration))
-    else:
-        start_cut = start_idx * single_duration
-        end_cut = start_cut + video_duration
-        final_audio_clip = full_audio.subclip(start_cut, min(end_cut, audio_duration))
+        # فتح ملف الصوت لحساب الطول الفعلي الدقيق للآية الحالية بالثانية
+        audio_clip = AudioFileClip(temp_audio_name)
+        duration = audio_clip.duration
         
-    video_clip = video_clip.set_audio(final_audio_clip)
+        # توليد فريمات مخصصة لهذه الآية بناءً على طول صوتها الحقيقي والظهور بدون تداخل
+        num_frames = int(duration * fps)
+        frames = [create_text_image(text, font_path) for _ in range(num_frames)]
+        
+        # دمج الصوت والصورة للآية الواحدة ككليب مستقل تماماً ومحكم المزامنة
+        sub_video_clip = ImageSequenceClip(frames, fps=fps)
+        sub_video_clip = sub_video_clip.set_audio(audio_clip)
+        
+        video_clips_pool.append(sub_video_clip)
+        
+    if not video_clips_pool:
+        print("خطأ: لم يتم تحميل كليبات صالحة.")
+        return
+        
+    print("جاري ربط الكليبات الفردية بسلسلة متصلة لا تقبل التداخل...")
+    # ربط الكليبات المستقلة تلو الأخرى برمجياً وبشكل تتابعي تام
+    final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
     
     output_filename = "quran_chroma.mp4"
-    video_clip.write_videofile(
+    final_video_clip.write_videofile(
         output_filename,
         fps=fps,
         codec="libx264",
@@ -170,17 +161,18 @@ def generate_video():
         logger=None
     )
     
-    # إغلاق كتل الصوت والفيديو بشكل سليم لتحرير الملفات قبل محاولة الحذف من النظام
-    video_clip.close()
-    final_audio_clip.close()
-    full_audio.close()
-    
+    # تحرير وإغلاق كافة قنوات الذاكرة لمنع تعليق النظام (Exit code 1)
+    final_video_clip.close()
+    for clip in video_clips_pool:
+        clip.close()
+        
+    # إرسال النتيجة إلى تيليجرام
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-    type_text = "سورة كاملة" if is_full else "مقطع خاشع (٦ آيات متتالية)"
+    type_text = "سورة كاملة بالاتساق الفعلي" if is_full else "٦ آيات متزامنة بالملي ثانية بدون تداخل"
     caption_text = (
         f"📖 {surah_name} ({type_text})\n"
-        f"🎙️ بصوت {reciter['name']}\n"
-        f"✨ كروما سوداء جاهزة للتصميم والمونتاج\n\n"
+        f"🎙️ بصوت {reciter_name}\n"
+        f"✨ كروما سوداء بمزامنة صوتية حقيقية ومطلقة للآيات\n\n"
         f"بواسطة المطور: {YOUR_NAME}"
     )
     
@@ -191,21 +183,23 @@ def generate_video():
             files={'video': video_file}
         )
         
-    # حذف آمن للملفات المؤقتة بعد تحريرها بالكامل
-    cleanup_files = [full_audio_path, output_filename, font_path]
-    for file in cleanup_files:
+    # حذف وتنظيف آمن لجميع الملفات المؤقتة والخطوط
+    temp_files_to_delete.append(output_filename)
+    temp_files_to_delete.append(font_path)
+    
+    for file in temp_files_to_delete:
         try:
             if os.path.exists(file):
                 os.remove(file)
         except Exception as e:
-            print(f"فشل حذف الملف {file}: {e}")
+            print(f"تخطي حذف الملف {file}: {e}")
             
     if response.status_code == 200:
         print("====================================")
-        print(f"تم الإرسال بنجاح! السورة: {surah_name} ✅")
+        print(f"تمت المزامنة المطلقة ونشر مقطع {surah_name} بنجاح! ✅")
         print("====================================")
     else:
-        print(f"فشل الإرسال، كود الخطأ: {response.status_code}")
+        print(f"فشل إرسال المقطع لتيليجرام، كود الخطأ: {response.status_code}")
 
 if __name__ == "__main__":
     generate_video()
