@@ -9,7 +9,7 @@ from moviepy.editor import AudioFileClip, ImageSequenceClip, concatenate_videocl
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# مكتبات إعادة تشكيل النص العربي لمنع انقلاب الحروف
+# دعم اللغة العربية لإظهار الحروف بشكل صحيح ومربوط
 try:
     import arabic_reshaper
     from bidi.algorithm import get_display
@@ -109,7 +109,8 @@ def get_precise_quran_data():
         attempts += 1
         surah_num = random.randint(1, 100)
         
-        api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
+        # استخدام الـ API بدون تحديد الصوت في النهاية لضمان جلب النصوص ومطابقتها
+        api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}"
         try:
             r = requests.get(api_url, timeout=15)
             if r.status_code == 200:
@@ -129,17 +130,17 @@ def get_precise_quran_data():
                     continue
                     
                 save_to_history(history_entry)
-                return selected_ayahs, surah_name, reciter['name'], surah_num
+                return selected_ayahs, surah_name, reciter['name'], reciter['id']
         except Exception as e:
             print(f"⚠️ خطأ أثناء جلب السورة: {e}")
             
     fallback_ayahs = [
-        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/262.mp3"}
+        {"number": 262, "text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ"}
     ]
-    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2
+    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", "ar.husary"
 
 def generate_video():
-    ayahs, surah_name, reciter_name, surah_num = get_precise_quran_data()
+    ayahs, surah_name, reciter_name, reciter_id = get_precise_quran_data()
     font_path = download_arabic_font()
     
     video_clips_pool = []
@@ -147,9 +148,9 @@ def generate_video():
     total_duration = 0.0
     TARGET_DURATION = 30.0
     
-    print(f"جاري معالجة مقطع دقيق (~30 ثانية) بدون تقطيع صوتي لـ {surah_name} بصوت {reciter_name}...")
+    print(f"جاري معالجة مقطع (~30 ثانية) لـ {surah_name} بصوت {reciter_name}...")
     
-    fps = 24  # زيادة معدل الإطارات لدقة وسلاسة أعلى
+    fps = 24
     
     try:
         for idx, ayah in enumerate(ayahs):
@@ -160,7 +161,9 @@ def generate_video():
             if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
                 text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
                 
-            audio_url = ayah['audio']
+            # بناء رابط الصوت الصريح بدقة وتفادي خطأ 'audio'
+            ayah_number = ayah['number']
+            audio_url = f"https://cdn.islamic.network/quran/audio/128/{reciter_id}/{ayah_number}.mp3"
             temp_audio_name = f"precise_ayah_{idx}.mp3"
             
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -172,7 +175,6 @@ def generate_video():
                 f.write(r.content)
             temp_files_to_delete.append(temp_audio_name)
             
-            # تحميل الصوت الكامل للآية دون تقطيعه لتفادي التفرقع والتشويش
             audio_clip = AudioFileClip(temp_audio_name)
             duration = audio_clip.duration
             
@@ -191,7 +193,6 @@ def generate_video():
             num_chunks = len(text_chunks)
             chunk_duration = duration / num_chunks
             
-            # بناء مقطع الفيديو للآية
             sub_clips = []
             for i, chunk in enumerate(text_chunks):
                 actual_chunk_duration = chunk_duration
@@ -203,7 +204,6 @@ def generate_video():
                 chunk_clip = ImageSequenceClip(frames, fps=fps).set_duration(actual_chunk_duration)
                 sub_clips.append(chunk_clip)
                 
-            # دمج مقاطع النص بصرياً ثم إضافة صوت الآية كاملاً مرة واحدة
             ayah_video = concatenate_videoclips(sub_clips, method="compose")
             ayah_final_clip = ayah_video.set_audio(audio_clip)
             
@@ -213,7 +213,7 @@ def generate_video():
         if not video_clips_pool:
             raise ValueError("لم يتم إنشاء مقاطع.")
             
-        print(f"المدة الإجمالية المستهدفة: {round(total_duration, 1)} ثانية.")
+        print(f"المدة الإجمالية للإنتاج: {round(total_duration, 1)} ثانية.")
         final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
         
         output_filename = "quran_chroma.mp4"
@@ -223,7 +223,7 @@ def generate_video():
             codec="libx264",
             audio_codec="aac",
             audio_fps=44100,
-            audio_bitrate="256k", # جودة صوت نقية عالية الدقة
+            audio_bitrate="256k",
             logger=None
         )
         
@@ -234,8 +234,8 @@ def generate_video():
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
         caption_text = (
             f"📖 {surah_name} (مقطع 30 ثانية)\n"
-            f"🎙️ تلاوة صافية بصوت {reciter_name}\n"
-            f"✨ كروما سوداء عالية الدقة (1080x1920) بدون تقطيع صوتي\n\n"
+            f"🎙️ تلاوة بترتيل {reciter_name}\n"
+            f"✨ كروما سوداء عالية الدقة (1080x1920)\n\n"
             f"بواسطة المطور: {YOUR_NAME}"
         )
         
@@ -250,7 +250,7 @@ def generate_video():
         
         if response.status_code == 200:
             print("====================================")
-            print(f"تم إنشاء الفيديو وصوته نقي 100% بدون أي تقطيع! ✅")
+            print(f"تم إنشاء الفيديو بنجاح وبدون أي أخطاء! ✅")
             print("====================================")
         else:
             print(f"⚠️ فشل إرسال الملف لتيليجرام: {response.status_code}")
