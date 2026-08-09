@@ -13,7 +13,6 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
-# قائمة قراء الترتيل المعتمدين والمحددين من قبلك
 RECITERS = [
     {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi"},
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -52,11 +51,12 @@ def download_arabic_font():
             print(f"⚠️ فشل جلب الخط المخصص: {e}")
     return font_path
 
-def create_text_image(text, font_path, width=720, height=1280):
+# تكبير الأبعاد لتكون 1080x1920 (Full HD Vertical) لمنع ظهور النصوص بشكل صغير
+def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(font_path, 48)
+        font = ImageFont.truetype(font_path, 65) # خط أكبر ومناسب
     except Exception:
         font = ImageFont.load_default()
         
@@ -87,58 +87,63 @@ def split_long_text(text, max_words=5):
 def get_precise_quran_data():
     reciter = random.choice(RECITERS)
     history = get_viewed_history()
-    surah_num = random.randint(1, 114)
     
-    api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
-    
-    try:
-        r = requests.get(api_url, timeout=15)
-        if r.status_code == 200:
-            data = r.json()['data']
-            surah_name = data['name']
-            ayahs = data['ayahs']
-            total_ayahs = len(ayahs)
-            
-            if total_ayahs <= 8:
-                selected_ayahs = ayahs
-                history_entry = f"{surah_num}_all_{reciter['id']}"
-                if history_entry in history:
-                    return get_precise_quran_data()
-                save_to_history(history_entry)
-                is_full = True
-            else:
-                start_ayah_idx = random.randint(0, total_ayahs - 6)
-                selected_ayahs = ayahs[start_ayah_idx : start_ayah_idx + 6]
-                history_entry = f"{surah_num}_{start_ayah_idx}_{start_ayah_idx+6}_{reciter['id']}"
-                if history_entry in history:
-                    return get_precise_quran_data()
-                save_to_history(history_entry)
-                is_full = False
-                
-            return selected_ayahs, surah_name, reciter['name'], is_full, surah_num
-    except Exception as e:
-        print(f"⚠️ فشل الـ API ({e})، جاري جلب سورة بديلة...")
+    # تجنب السور القصيرة (اختيار من السور المتوسطة والطويلة فقط)
+    attempts = 0
+    while attempts < 15:
+        attempts += 1
+        surah_num = random.randint(1, 100) # الابتعاد عن السور الأخيرة القصيرة جداً
         
+        api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
+        try:
+            r = requests.get(api_url, timeout=15)
+            if r.status_code == 200:
+                data = r.json()['data']
+                surah_name = data['name']
+                ayahs = data['ayahs']
+                total_ayahs = len(ayahs)
+                
+                # استبعاد أي سورة عدد آياتها أقل من 12
+                if total_ayahs < 12:
+                    continue
+                
+                # اختيار نقطة بداية عشوائية في السورة
+                start_idx = random.randint(0, max(0, total_ayahs - 10))
+                selected_ayahs = ayahs[start_idx:]
+                
+                history_entry = f"{surah_num}_{start_idx}_{reciter['id']}"
+                if history_entry in history:
+                    continue
+                    
+                save_to_history(history_entry)
+                return selected_ayahs, surah_name, reciter['name'], surah_num
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء جلب السورة: {e}")
+            
+    # احتياطي في حالة تعثر الـ API
     fallback_ayahs = [
-        {"text": "إِنَّا أَعْطَيْنَاكَ الْكَوْثَرَ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5418.mp3"},
-        {"text": "فَصَلِّ لِرَبِّكَ وَانْحَرْ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5419.mp3"},
-        {"text": "إِنَّ شَانِئَكَ هُوَ الْأَبْتَرُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/5420.mp3"}
+        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/262.mp3"}
     ]
-    return fallback_ayahs, "سورة الكوثر", "الشيخ محمود خليل الحصري", True, 108
+    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2
 
 def generate_video():
-    ayahs, surah_name, reciter_name, is_full, surah_num = get_precise_quran_data()
+    ayahs, surah_name, reciter_name, surah_num = get_precise_quran_data()
     font_path = download_arabic_font()
     
     video_clips_pool = []
     temp_files_to_delete = []
+    total_duration = 0.0
+    TARGET_DURATION = 30.0 # الاستهداف: 30 ثانية
     
-    print(f"جاري معالجة ومزامنة الآيات لـ {surah_name} بصوت {reciter_name}...")
+    print(f"جاري معالجة مقطع ~30 ثانية لـ {surah_name} بصوت {reciter_name}...")
     
     fps = 10
     
     try:
         for idx, ayah in enumerate(ayahs):
+            if total_duration >= TARGET_DURATION:
+                break # التوقف فور الوصول لـ 30 ثانية
+                
             text = ayah['text']
             if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
                 text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
@@ -149,28 +154,34 @@ def generate_video():
             headers = {'User-Agent': 'Mozilla/5.0'}
             r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
             if r.status_code != 200:
-                raise ValueError(f"فشل تحميل الصوت: {audio_url}")
+                continue
                 
             with open(temp_audio_name, "wb") as f:
                 f.write(r.content)
             temp_files_to_delete.append(temp_audio_name)
             
             raw_audio = AudioFileClip(temp_audio_name)
-            
-            # معالجة تقطع الصوت والتلاشي التلقائي عند الحواف
             audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
             duration = audio_clip.duration
             
             if duration <= 0.1:
                 duration = 2.0
                 
+            # اقتطاع الآية الأخيرة إذا كانت ستجعل الفيديو يتدعدى 32 ثانية
+            if total_duration + duration > TARGET_DURATION + 3:
+                allowed_duration = TARGET_DURATION - total_duration
+                if allowed_duration > 3.0: # إذا كان المتبقي أكثر من 3 ثواني نأخذ جزء منها
+                    audio_clip = audio_clip.subclip(0, allowed_duration)
+                    duration = allowed_duration
+                else:
+                    break
+            
             text_chunks = split_long_text(text, max_words=5)
             num_chunks = len(text_chunks)
             chunk_duration = duration / num_chunks
             
             sub_clips = []
             for i, chunk in enumerate(text_chunks):
-                # مزامنة حسابية دقيقة متطابقة مع زمن الجزء الصوتي
                 start_audio = i * chunk_duration
                 end_audio = min((i + 1) * chunk_duration, duration)
                 actual_chunk_duration = end_audio - start_audio
@@ -190,11 +201,12 @@ def generate_video():
                 
             ayah_final_clip = concatenate_videoclips(sub_clips, method="compose")
             video_clips_pool.append(ayah_final_clip)
+            total_duration += duration
             
         if not video_clips_pool:
-            raise ValueError("مسبح الكليبات فارغ.")
+            raise ValueError("لم يتم إنشاء مقاطع.")
             
-        print("جاري دمج المقاطع في الكروما النهائية مع الترشيح الصوتي والمزامنة الدقيقة...")
+        print(f"مدة الفيديو الإجمالية: {round(total_duration, 1)} ثانية.")
         final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
         
         output_filename = "quran_chroma.mp4"
@@ -213,11 +225,10 @@ def generate_video():
             clip.close()
             
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-        type_text = "سورة كاملة" if is_full else "6 آيات متزامنة"
         caption_text = (
-            f"📖 {surah_name} ({type_text})\n"
-            f"🎙️ تلاوة خاشعة بترتيل {reciter_name}\n"
-            f"✨ كروما سوداء متزامنة وصافية الصوت بنسبة 100%\n\n"
+            f"📖 {surah_name} (مقطع 30 ثانية)\n"
+            f"🎙️ تلاوة بترتيل {reciter_name}\n"
+            f"✨ كروما سوداء عالية الدقة (1080x1920)\n\n"
             f"بواسطة المطور: {YOUR_NAME}"
         )
         
@@ -232,7 +243,7 @@ def generate_video():
         
         if response.status_code == 200:
             print("====================================")
-            print(f"تمت المزامنة الصافية وتصميم فيديو {surah_name} بنجاح! ✅")
+            print(f"تم إنشاء فيديو {surah_name} بمقاس ممتازي ومدة {round(total_duration)} ثانية! ✅")
             print("====================================")
         else:
             print(f"⚠️ فشل إرسال الملف لتيليجرام: {response.status_code}")
@@ -253,7 +264,7 @@ def generate_video():
                 if os.path.exists(file):
                     os.remove(file)
             except Exception as e:
-                print(f"تخطي حذف {file}: {e}")
+                pass
         
         gc.collect()
 
