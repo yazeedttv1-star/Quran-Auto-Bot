@@ -61,8 +61,11 @@ def download_arabic_font():
 
 def prepare_arabic_text(text):
     if HAS_ARABIC_SUPPORT:
-        reshaped_text = arabic_reshaper.reshape(text)
-        return get_display(reshaped_text)
+        try:
+            reshaped_text = arabic_reshaper.reshape(text)
+            return get_display(reshaped_text)
+        except Exception:
+            return text
     return text
 
 def create_text_image(text, font_path, width=1080, height=1920):
@@ -72,7 +75,7 @@ def create_text_image(text, font_path, width=1080, height=1920):
     formatted_text = prepare_arabic_text(text)
     
     try:
-        font = ImageFont.truetype(font_path, 65)
+        font = ImageFont.truetype(font_path, 60)
     except Exception:
         font = ImageFont.load_default()
         
@@ -109,7 +112,6 @@ def get_precise_quran_data():
         attempts += 1
         surah_num = random.randint(1, 100)
         
-        # استخدام الـ API بدون تحديد الصوت في النهاية لضمان جلب النصوص ومطابقتها
         api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}"
         try:
             r = requests.get(api_url, timeout=15)
@@ -150,7 +152,7 @@ def generate_video():
     
     print(f"جاري معالجة مقطع (~30 ثانية) لـ {surah_name} بصوت {reciter_name}...")
     
-    fps = 24
+    fps = 20
     
     try:
         for idx, ayah in enumerate(ayahs):
@@ -158,57 +160,62 @@ def generate_video():
                 break
                 
             text = ayah['text']
-            if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
+            
+            # تنظيف صريح وأمن للبسملة بدون إتلاف النص
+            if "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ" in text and len(text) > 40:
                 text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
                 
-            # بناء رابط الصوت الصريح بدقة وتفادي خطأ 'audio'
             ayah_number = ayah['number']
             audio_url = f"https://cdn.islamic.network/quran/audio/128/{reciter_id}/{ayah_number}.mp3"
             temp_audio_name = f"precise_ayah_{idx}.mp3"
             
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
-            if r.status_code != 200:
-                continue
-                
-            with open(temp_audio_name, "wb") as f:
-                f.write(r.content)
-            temp_files_to_delete.append(temp_audio_name)
-            
-            audio_clip = AudioFileClip(temp_audio_name)
-            duration = audio_clip.duration
-            
-            if duration <= 0.1:
-                duration = 2.0
-                
-            if total_duration + duration > TARGET_DURATION + 3:
-                allowed_duration = TARGET_DURATION - total_duration
-                if allowed_duration > 3.0:
-                    audio_clip = audio_clip.subclip(0, allowed_duration)
-                    duration = allowed_duration
-                else:
-                    break
-            
-            text_chunks = split_long_text(text, max_words=5)
-            num_chunks = len(text_chunks)
-            chunk_duration = duration / num_chunks
-            
-            sub_clips = []
-            for i, chunk in enumerate(text_chunks):
-                actual_chunk_duration = chunk_duration
-                num_frames = int(actual_chunk_duration * fps)
-                if num_frames == 0:
-                    num_frames = 1
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
+                if r.status_code != 200:
+                    continue
                     
-                frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
-                chunk_clip = ImageSequenceClip(frames, fps=fps).set_duration(actual_chunk_duration)
-                sub_clips.append(chunk_clip)
+                with open(temp_audio_name, "wb") as f:
+                    f.write(r.content)
+                temp_files_to_delete.append(temp_audio_name)
                 
-            ayah_video = concatenate_videoclips(sub_clips, method="compose")
-            ayah_final_clip = ayah_video.set_audio(audio_clip)
-            
-            video_clips_pool.append(ayah_final_clip)
-            total_duration += duration
+                audio_clip = AudioFileClip(temp_audio_name)
+                duration = audio_clip.duration
+                
+                if duration <= 0.1:
+                    continue
+                    
+                if total_duration + duration > TARGET_DURATION + 3:
+                    allowed_duration = TARGET_DURATION - total_duration
+                    if allowed_duration > 3.0:
+                        audio_clip = audio_clip.subclip(0, allowed_duration)
+                        duration = allowed_duration
+                    else:
+                        break
+                
+                text_chunks = split_long_text(text, max_words=5)
+                num_chunks = len(text_chunks)
+                chunk_duration = duration / num_chunks
+                
+                sub_clips = []
+                for chunk in text_chunks:
+                    actual_chunk_duration = chunk_duration
+                    num_frames = int(actual_chunk_duration * fps)
+                    if num_frames == 0:
+                        num_frames = 1
+                        
+                    frames = [create_text_image(chunk, font_path) for _ in range(num_frames)]
+                    chunk_clip = ImageSequenceClip(frames, fps=fps).set_duration(actual_chunk_duration)
+                    sub_clips.append(chunk_clip)
+                    
+                ayah_video = concatenate_videoclips(sub_clips, method="compose")
+                ayah_final_clip = ayah_video.set_audio(audio_clip)
+                
+                video_clips_pool.append(ayah_final_clip)
+                total_duration += duration
+            except Exception as ayah_err:
+                print(f"تخطي آية بسبب خطأ في المعالجة: {ayah_err}")
+                continue
             
         if not video_clips_pool:
             raise ValueError("لم يتم إنشاء مقاطع.")
@@ -223,7 +230,7 @@ def generate_video():
             codec="libx264",
             audio_codec="aac",
             audio_fps=44100,
-            audio_bitrate="256k",
+            audio_bitrate="192k",
             logger=None
         )
         
