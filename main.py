@@ -3,6 +3,7 @@ import random
 import requests
 import numpy as np
 import gc
+import time
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import AudioFileClip, ImageSequenceClip, concatenate_videoclips
 
@@ -13,12 +14,13 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
+# إضافة معرفات everyayah كخطة احتياطية للسيرفر الأول
 RECITERS = [
-    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi"},
-    {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
-    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary"},
-    {"name": "الشيخ السيد سعيد", "id": "ar.sayyidsaeed"},
-    {"name": "الشيخ حسن صالح", "id": "ar.hasansalih"}
+    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "everyayah_folder": "Minshawy_Murattal_128kbps"},
+    {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary", "everyayah_folder": "Yasser_Ad-Dussary_128kbps"},
+    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary", "everyayah_folder": "Husary_128kbps"},
+    {"name": "الشيخ السيد سعيد", "id": "ar.sayyidsaeed", "everyayah_folder": "Sayeed_Sayeed_64kbps"},
+    {"name": "الشيخ حسن صالح", "id": "ar.hasansalih", "everyayah_folder": "Hasan_Salih_128kbps"}
 ]
 
 HISTORY_FILE = "history.txt"
@@ -43,20 +45,22 @@ def download_arabic_font():
     font_url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
     font_path = "Amiri-Regular.ttf"
     if not os.path.exists(font_path):
-        try:
-            r = requests.get(font_url, timeout=15)
-            with open(font_path, "wb") as f:
-                f.write(r.content)
-        except Exception as e:
-            print(f"⚠️ فشل جلب الخط المخصص: {e}")
+        for attempt in range(3):
+            try:
+                r = requests.get(font_url, timeout=20)
+                with open(font_path, "wb") as f:
+                    f.write(r.content)
+                break
+            except Exception as e:
+                print(f"⚠️ محاولة {attempt + 1} لتنزيل الخط فشلت: {e}")
+                time.sleep(2)
     return font_path
 
-# تكبير الأبعاد لتكون 1080x1920 (Full HD Vertical) لمنع ظهور النصوص بشكل صغير
 def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(font_path, 65) # خط أكبر ومناسب
+        font = ImageFont.truetype(font_path, 65)
     except Exception:
         font = ImageFont.load_default()
         
@@ -95,7 +99,7 @@ def get_precise_quran_data():
         
         api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
         try:
-            r = requests.get(api_url, timeout=15)
+            r = requests.get(api_url, timeout=20)
             if r.status_code == 200:
                 data = r.json()['data']
                 surah_name = data['name']
@@ -113,17 +117,39 @@ def get_precise_quran_data():
                     continue
                     
                 save_to_history(history_entry)
-                return selected_ayahs, surah_name, reciter['name'], surah_num, reciter['id']
+                return selected_ayahs, surah_name, reciter['name'], surah_num, reciter
         except Exception as e:
-            print(f"⚠️ خطأ أثناء جلب السورة: {e}")
+            print(f"⚠️ خطأ أثناء جلب السورة من الـ API (محاولة {attempts}): {e}")
+            time.sleep(1)
             
     fallback_ayahs = [
-        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "number": 262}
+        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "number": 262, "numberInSurah": 255}
     ]
-    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2, "ar.husary"
+    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2, RECITERS[2]
+
+# دالة مخصصة لتحميل الصوت مع معالجة الأخطاء ورابط احتياطي
+def fetch_audio_file(audio_urls, temp_audio_name):
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    for url in audio_urls:
+        if not url:
+            continue
+            
+        for attempt in range(3): # المحاولة 3 مرات لكل رابط
+            try:
+                r = requests.get(url, timeout=25, headers=headers, verify=False)
+                if r.status_code == 200:
+                    with open(temp_audio_name, "wb") as f:
+                        f.write(r.content)
+                    return True
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️ فشل اتصال عند التنزيل من {url} (محاولة {attempt + 1}/3): {e}")
+                time.sleep(2 * (attempt + 1))
+                
+    return False
 
 def generate_video():
-    ayahs, surah_name, reciter_name, surah_num, reciter_id = get_precise_quran_data()
+    ayahs, surah_name, reciter_name, surah_num, reciter_info = get_precise_quran_data()
     font_path = download_arabic_font()
     
     video_clips_pool = []
@@ -144,26 +170,40 @@ def generate_video():
             if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
                 text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
             
-            # الحصول على رابط الصوت بأمان دون حدوث KeyError
-            audio_url = ayah.get('audio')
-            if not audio_url:
-                ayah_number = ayah.get('number')
-                audio_url = f"https://cdn.islamic.network/quran/audio/128/{reciter_id}/{ayah_number}.mp3"
+            ayah_global_num = ayah.get('number')
+            ayah_in_surah = ayah.get('numberInSurah')
+            
+            # بناء قائمة الروابط الأساسية والبديلة (Primary + Fallback CDN)
+            audio_urls = []
+            if ayah.get('audio'):
+                audio_urls.append(ayah.get('audio'))
+            
+            if ayah_global_num:
+                audio_urls.append(f"https://cdn.islamic.network/quran/audio/128/{reciter_info['id']}/{ayah_global_num}.mp3")
+                
+            if ayah_in_surah and 'everyayah_folder' in reciter_info:
+                # سيرفر احتياطي من everyayah
+                s_str = str(surah_num).zfill(3)
+                a_str = str(ayah_in_surah).zfill(3)
+                audio_urls.append(f"https://www.everyayah.com/data/{reciter_info['everyayah_folder']}/{s_str}{a_str}.mp3")
                 
             temp_audio_name = f"precise_ayah_{idx}.mp3"
             
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            r = requests.get(audio_url, timeout=15, headers=headers, verify=False)
-            if r.status_code != 200:
+            # محاولة تحميل الملف بأمان مع تفادي الأخطاء
+            success = fetch_audio_file(audio_urls, temp_audio_name)
+            if not success:
+                print(f"❌ التجاوز عن الآية رقم {idx+1} لعدم التمكن من جلب الصوت.")
                 continue
                 
-            with open(temp_audio_name, "wb") as f:
-                f.write(r.content)
             temp_files_to_delete.append(temp_audio_name)
             
-            raw_audio = AudioFileClip(temp_audio_name)
-            audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
-            duration = audio_clip.duration
+            try:
+                raw_audio = AudioFileClip(temp_audio_name)
+                audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
+                duration = audio_clip.duration
+            except Exception as e:
+                print(f"⚠️ ملف الصوت تالف أو متعذر قراءته: {e}")
+                continue
             
             if duration <= 0.1:
                 duration = 2.0
@@ -204,7 +244,7 @@ def generate_video():
             total_duration += duration
             
         if not video_clips_pool:
-            raise ValueError("لم يتم إنشاء مقاطع.")
+            raise ValueError("لم يتم إنتاج أي مقطع بسبب مشاكل بالاتصال.")
             
         print(f"مدة الفيديو الإجمالية: {round(total_duration, 1)} ثانية.")
         final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
@@ -232,21 +272,28 @@ def generate_video():
             f"بواسطة المطور: {YOUR_NAME}"
         )
         
-        with open(output_filename, 'rb') as video_file:
-            response = requests.post(
-                url,
-                data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption_text},
-                files={'video': video_file}
-            )
+        # إرسال إلى تيليجرام مع إعادة المحاولة
+        for attempt in range(3):
+            try:
+                with open(output_filename, 'rb') as video_file:
+                    response = requests.post(
+                        url,
+                        data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption_text},
+                        files={'video': video_file},
+                        timeout=60
+                    )
+                if response.status_code == 200:
+                    print("====================================")
+                    print(f"تم إنشاء فيديو {surah_name} بمقاس ممتاز ومدة {round(total_duration)} ثانية! ✅")
+                    print("====================================")
+                    break
+                else:
+                    print(f"⚠️ فشل إرسال الملف لتيليجرام (رمز: {response.status_code})")
+            except Exception as e:
+                print(f"⚠️ فشل إرسال الفيديو لتيليجرام، محاولة {attempt+1}: {e}")
+                time.sleep(3)
             
         temp_files_to_delete.append(output_filename)
-        
-        if response.status_code == 200:
-            print("====================================")
-            print(f"تم إنشاء فيديو {surah_name} بمقاس ممتازي ومدة {round(total_duration)} ثانية! ✅")
-            print("====================================")
-        else:
-            print(f"⚠️ فشل إرسال الملف لتيليجرام: {response.status_code}")
             
     except Exception as e:
         print(f"❌ حدث خطأ غير متوقع: {e}")
@@ -263,7 +310,7 @@ def generate_video():
             try:
                 if os.path.exists(file):
                     os.remove(file)
-            except Exception as e:
+            except Exception:
                 pass
         
         gc.collect()
