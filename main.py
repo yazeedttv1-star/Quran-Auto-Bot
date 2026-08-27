@@ -88,11 +88,10 @@ def get_precise_quran_data():
     reciter = random.choice(RECITERS)
     history = get_viewed_history()
     
-    # تجنب السور القصيرة (اختيار من السور المتوسطة والطويلة فقط)
     attempts = 0
     while attempts < 15:
         attempts += 1
-        surah_num = random.randint(1, 100) # الابتعاد عن السور الأخيرة القصيرة جداً
+        surah_num = random.randint(1, 100)
         
         api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
         try:
@@ -103,11 +102,9 @@ def get_precise_quran_data():
                 ayahs = data['ayahs']
                 total_ayahs = len(ayahs)
                 
-                # استبعاد أي سورة عدد آياتها أقل من 12
                 if total_ayahs < 12:
                     continue
                 
-                # اختيار نقطة بداية عشوائية في السورة
                 start_idx = random.randint(0, max(0, total_ayahs - 10))
                 selected_ayahs = ayahs[start_idx:]
                 
@@ -116,24 +113,23 @@ def get_precise_quran_data():
                     continue
                     
                 save_to_history(history_entry)
-                return selected_ayahs, surah_name, reciter['name'], surah_num
+                return selected_ayahs, surah_name, reciter['name'], surah_num, reciter['id']
         except Exception as e:
             print(f"⚠️ خطأ أثناء جلب السورة: {e}")
             
-    # احتياطي في حالة تعثر الـ API
     fallback_ayahs = [
-        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/262.mp3"}
+        {"text": "اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ", "number": 262}
     ]
-    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2
+    return fallback_ayahs, "سورة البقرة", "الشيخ محمود خليل الحصري", 2, "ar.husary"
 
 def generate_video():
-    ayahs, surah_name, reciter_name, surah_num = get_precise_quran_data()
+    ayahs, surah_name, reciter_name, surah_num, reciter_id = get_precise_quran_data()
     font_path = download_arabic_font()
     
     video_clips_pool = []
     temp_files_to_delete = []
     total_duration = 0.0
-    TARGET_DURATION = 30.0 # الاستهداف: 30 ثانية
+    TARGET_DURATION = 30.0
     
     print(f"جاري معالجة مقطع ~30 ثانية لـ {surah_name} بصوت {reciter_name}...")
     
@@ -142,13 +138,18 @@ def generate_video():
     try:
         for idx, ayah in enumerate(ayahs):
             if total_duration >= TARGET_DURATION:
-                break # التوقف فور الوصول لـ 30 ثانية
+                break
                 
             text = ayah['text']
             if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
                 text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
+            
+            # الحصول على رابط الصوت بأمان دون حدوث KeyError
+            audio_url = ayah.get('audio')
+            if not audio_url:
+                ayah_number = ayah.get('number')
+                audio_url = f"https://cdn.islamic.network/quran/audio/128/{reciter_id}/{ayah_number}.mp3"
                 
-            audio_url = ayah['audio']
             temp_audio_name = f"precise_ayah_{idx}.mp3"
             
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -167,10 +168,9 @@ def generate_video():
             if duration <= 0.1:
                 duration = 2.0
                 
-            # اقتطاع الآية الأخيرة إذا كانت ستجعل الفيديو يتدعدى 32 ثانية
             if total_duration + duration > TARGET_DURATION + 3:
                 allowed_duration = TARGET_DURATION - total_duration
-                if allowed_duration > 3.0: # إذا كان المتبقي أكثر من 3 ثواني نأخذ جزء منها
+                if allowed_duration > 3.0:
                     audio_clip = audio_clip.subclip(0, allowed_duration)
                     duration = allowed_duration
                 else:
