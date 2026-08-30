@@ -31,7 +31,6 @@ ERROR_LOG_FILE = "error_log.txt"
 
 AYAHS_COUNT = 5           # عدد الآيات الثابت لكل فيديو
 TARGET_DURATION = 30.0    # المدة المستهدفة بالثواني
-# نطاق المدة الطبيعي المقبول قبل الضبط الدقيق للسرعة (يحافظ على جودة الصوت)
 DURATION_TOLERANCE_MIN = 24.0
 DURATION_TOLERANCE_MAX = 40.0
 SPEED_FACTOR_MIN = 0.8
@@ -54,7 +53,7 @@ def log_error(context, exc):
         with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(msg)
     except Exception:
-        pass  # حتى لو فشل تسجيل الخطأ لا نوقف التنفيذ
+        pass
 
 
 def notify_telegram_error(context, exc):
@@ -201,7 +200,6 @@ def get_precise_quran_data():
                 time.sleep(1)
                 continue
 
-    # احتياطي ثابت (الفاتحة) لو فشلت كل المحاولات مع كل القراء
     fallback_ayahs = [
         {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "number": 1, "numberInSurah": 1},
         {"text": "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "number": 2, "numberInSurah": 2},
@@ -263,251 +261,103 @@ def build_ayah_urls(ayah, surah_num, reciter_info):
 def build_ayah_batch():
     """
     يحاول عدة مرات جلب 5 آيات وتنزيل صوتها بنجاح، ضمن مدة زمنية طبيعية معقولة.
-    إن فشلت محاولة (تنزيل ناقص/مدة غير منطقية) يتم تنظيف الملفات وإعادة المحاولة بسورة أخرى.
     """
-    last_error = None
-
     for global_try in range(1, MAX_BATCH_RETRIES + 1):
         ayahs, surah_name, reciter_name, surah_num, reciter_info = get_precise_quran_data()
 
         downloaded = []
-        temp_files = []
         total_raw = 0.0
-        ok = True
+        batch_success = True
 
-        for idx, ayah in enumerate(ayahs):
-            audio_urls = build_ayah_urls(ayah, surah_num, reciter_info)
-            temp_audio_name = f"precise_ayah_{global_try}_{idx}.mp3"
+        for i, ayah in enumerate(ayahs):
+            temp_audio_name = f"temp_ayah_{i}.mp3"
+            urls = build_ayah_urls(ayah, surah_num, reciter_info)
 
-            success = fetch_audio_file(audio_urls, temp_audio_name)
+            success = fetch_audio_file(urls, temp_audio_name)
             if not success:
-                log_error("تنزيل صوت آية", Exception(f"تعذر تنزيل الآية رقم {idx + 1} من كل الروابط"))
-                ok = False
+                batch_success = False
                 break
 
-            temp_files.append(temp_audio_name)
-
             try:
-                raw_audio = AudioFileClip(temp_audio_name)
-                dur = raw_audio.duration
-                if not dur or dur <= 0.1:
-                    raise ValueError("مدة صوتية غير صالحة")
+                clip = AudioFileClip(temp_audio_name)
+                total_raw += clip.duration
+                downloaded.append((ayah, temp_audio_name, clip))
             except Exception as e:
-                log_error(f"قراءة ملف صوت الآية {idx + 1}", e)
-                ok = False
+                log_error(f"خطأ في تحميل المقطع الصوتي {temp_audio_name}", e)
+                batch_success = False
                 break
 
-            downloaded.append((ayah, raw_audio, dur, temp_audio_name))
-            total_raw += dur
+        if batch_success and (DURATION_TOLERANCE_MIN <= total_raw <= DURATION_TOLERANCE_MAX):
+            return downloaded, surah_name, reciter_name, total_raw
 
-        if ok and len(downloaded) == AYAHS_COUNT and DURATION_TOLERANCE_MIN <= total_raw <= DURATION_TOLERANCE_MAX:
-            return downloaded, surah_name, reciter_name, surah_num, total_raw
-
-        # تنظيف كل شيء من هذه المحاولة الفاشلة قبل إعادة المحاولة بسورة/قارئ آخر
-        for _, clip, _, _ in downloaded:
+        # تنظيف الملفات المؤقتة عند إخفاق الدفعة
+        for _, temp_name, clip in downloaded:
             try:
                 clip.close()
-            except Exception:
-                pass
-        for f in temp_files:
-            try:
-                if os.path.exists(f):
-                    os.remove(f)
-            except Exception:
-                pass
-
-        last_error = Exception(
-            f"محاولة {global_try}/{MAX_BATCH_RETRIES}: عدد الآيات المُحمّلة = {len(downloaded)}, "
-            f"المدة الطبيعية = {round(total_raw, 1)}ث (خارج النطاق أو تحميل ناقص)"
-        )
-        log_error("تجميع دفعة الآيات", last_error)
-
-    raise RuntimeError(f"تعذر تجميع {AYAHS_COUNT} آيات صالحة بعد {MAX_BATCH_RETRIES} محاولات. آخر سبب: {last_error}")
-
-
-# =========================================================
-#                     إرسال الفيديو لتيليجرام
-# =========================================================
-
-def send_video_to_telegram(filepath, caption_text, retries=3):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        log_error("إرسال تيليجرام", Exception("لم يتم ضبط TELEGRAM_TOKEN أو TELEGRAM_CHAT_ID في متغيرات البيئة"))
-        return False
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-
-    for attempt in range(1, retries + 1):
-        try:
-            with open(filepath, 'rb') as video_file:
-                response = requests.post(
-                    url,
-                    data={'chat_id': TELEGRAM_CHAT_ID, 'caption': caption_text},
-                    files={'video': video_file},
-                    timeout=90
-                )
-            if response.status_code == 200:
-                return True
-            log_error(
-                f"إرسال تيليجرام - محاولة {attempt}/{retries}",
-                Exception(f"رمز استجابة: {response.status_code} - {response.text[:200]}")
-            )
-        except Exception as e:
-            log_error(f"إرسال تيليجرام - محاولة {attempt}/{retries}", e)
-        time.sleep(3 * attempt)
-
-    return False
-
-
-# =========================================================
-#                      الدالة الرئيسية للإنتاج
-# =========================================================
-
-def generate_video():
-    font_path = None
-    video_clips_pool = []
-    raw_audio_clips = []
-    temp_files_to_delete = []
-    fps = 10
-
-    try:
-        font_path = retry(download_arabic_font, context="تحميل الخط", retries=3, delay=2)
-
-        downloaded, surah_name, reciter_name, surah_num, total_raw = build_ayah_batch()
-        temp_files_to_delete.extend([f for _, _, _, f in downloaded])
-        raw_audio_clips.extend([clip for _, clip, _, _ in downloaded])
-
-        # حساب عامل ضبط السرعة لجعل مجموع مدة الآيات الخمس = 30 ثانية بالضبط
-        speed_factor = total_raw / TARGET_DURATION
-        speed_factor = max(SPEED_FACTOR_MIN, min(SPEED_FACTOR_MAX, speed_factor))
-
-        print(f"جاري معالجة {AYAHS_COUNT} آيات من {surah_name} بصوت {reciter_name} "
-              f"(المدة الطبيعية: {round(total_raw, 1)}ث، عامل الضبط: {round(speed_factor, 3)})")
-
-        total_duration = 0.0
-
-        for idx, (ayah, raw_audio, raw_dur, _) in enumerate(downloaded):
-            text = ayah['text']
-            if idx == 0 and text.startswith("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ") and len(text) > 40:
-                text = text.replace("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "").strip()
-
-            try:
-                audio_clip = raw_audio.fx(speedx, speed_factor).audio_fadein(0.05).audio_fadeout(0.05)
-                duration = audio_clip.duration
+                if os.path.exists(temp_name):
+                    os.remove(temp_name)
             except Exception as e:
-                log_error(f"ضبط سرعة صوت الآية {idx + 1}", e)
-                audio_clip = raw_audio.audio_fadein(0.05).audio_fadeout(0.05)
-                duration = raw_audio.duration
-
-            text_chunks = split_long_text(text, max_words=5)
-            num_chunks = len(text_chunks)
-            chunk_duration = duration / num_chunks
-
-            sub_clips = []
-            for i, chunk in enumerate(text_chunks):
-                start_audio = i * chunk_duration
-                end_audio = min((i + 1) * chunk_duration, duration)
-                actual_chunk_duration = max(end_audio - start_audio, 1.0 / fps)
-
-                num_frames = max(1, int(actual_chunk_duration * fps))
-
-                try:
-                    frame = create_text_image(chunk, font_path)
-                except Exception as e:
-                    log_error(f"إنشاء صورة نصية للآية {idx + 1}", e)
-                    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
-
-                frames = [frame for _ in range(num_frames)]
-
-                chunk_clip = ImageSequenceClip(frames, fps=fps)
-                chunk_clip = chunk_clip.set_duration(actual_chunk_duration)
-
-                chunk_audio = audio_clip.subclip(start_audio, end_audio)
-                chunk_clip = chunk_clip.set_audio(chunk_audio)
-                sub_clips.append(chunk_clip)
-
-            ayah_final_clip = concatenate_videoclips(sub_clips, method="compose")
-            video_clips_pool.append(ayah_final_clip)
-            total_duration += duration
-
-        if not video_clips_pool:
-            raise ValueError("لم يتم إنتاج أي مقطع فيديو رغم نجاح تنزيل الصوت")
-
-        print(f"مدة الفيديو الإجمالية بعد الضبط: {round(total_duration, 2)} ثانية لعدد {len(video_clips_pool)} آيات.")
-
-        final_video_clip = concatenate_videoclips(video_clips_pool, method="compose")
-        output_filename = "quran_chroma.mp4"
-
-        retry(
-            final_video_clip.write_videofile,
-            output_filename,
-            fps=fps, codec="libx264", audio_codec="aac",
-            audio_fps=44100, audio_bitrate="192k", logger=None,
-            context="ترميز الفيديو النهائي", retries=2, delay=3
-        )
-
-        final_video_clip.close()
-        temp_files_to_delete.append(output_filename)
-
-        caption_text = (
-            f"📖 {surah_name} ({AYAHS_COUNT} آيات - 30 ثانية)\n"
-            f"🎙️ تلاوة بترتيل {reciter_name}\n"
-            f"✨ كروما سوداء عالية الدقة (1080x1920)\n\n"
-            f"بواسطة المطور: {YOUR_NAME}"
-        )
-
-        sent = send_video_to_telegram(output_filename, caption_text)
-        if sent:
-            print("====================================")
-            print(f"✅ تم إنشاء وإرسال فيديو {surah_name} بنجاح، المدة: {round(total_duration, 1)} ثانية "
-                  f"({AYAHS_COUNT} آيات).")
-            print("====================================")
-        else:
-            err = Exception("فشل إرسال الفيديو لتيليجرام بعد كل المحاولات (الفيديو تم إنشاؤه بنجاح محلياً)")
-            log_error("إرسال تيليجرام", err)
-            notify_telegram_error("إرسال الفيديو", err)
-
-    except Exception as e:
-        log_error("التنفيذ العام لـ generate_video", e)
-        notify_telegram_error("التنفيذ العام", e)
-
-    finally:
-        for clip in video_clips_pool:
-            try:
-                clip.close()
-            except Exception:
-                pass
-        for clip in raw_audio_clips:
-            try:
-                clip.close()
-            except Exception:
-                pass
-        if font_path:
-            # لا نحذف الخط فعلياً حتى لا نعيد تنزيله في كل تشغيل - إن رغبت بحذفه فعّل السطر التالي
-            # temp_files_to_delete.append(font_path)
-            pass
-        for file in set(temp_files_to_delete):
-            try:
-                if os.path.exists(file):
-                    os.remove(file)
-            except Exception as e:
-                log_error(f"حذف ملف مؤقت {file}", e)
+                log_error("تنظيف الملفات المؤقتة", e)
 
         gc.collect()
 
+    raise RuntimeError("تعذر تجميع دفعة آيات صالحة ضمن حدود المحاولات المسموحة.")
+
 
 # =========================================================
-#                        نقطة التشغيل الرئيسية
+#                     إنشاء الفيديو
 # =========================================================
+
+def generate_video():
+    font_path = download_arabic_font()
+    downloaded, surah_name, reciter_name, total_raw = build_ayah_batch()
+
+    audio_clips = []
+    video_clips = []
+
+    speed_factor = total_raw / TARGET_DURATION
+    speed_factor = max(SPEED_FACTOR_MIN, min(SPEED_FACTOR_MAX, speed_factor))
+
+    try:
+        for ayah, audio_file, a_clip in downloaded:
+            adjusted_audio = speedx(a_clip, factor=speed_factor)
+            audio_clips.append(adjusted_audio)
+
+            display_text = f"{ayah['text']}\n\n[{surah_name} - {reciter_name}]"
+            img_frame = create_text_image(display_text, font_path)
+
+            v_clip = ImageSequenceClip([img_frame], fps=1).set_duration(adjusted_audio.duration)
+            video_clips.append(v_clip)
+
+        final_audio = concatenate_videoclips(audio_clips).audio
+        final_video = concatenate_videoclips(video_clips, method="compose")
+        final_video.audio = final_audio
+
+        output_filename = "quran_video.mp4"
+        final_video.write_videofile(
+            output_filename,
+            fps=24,
+            codec="libx264",
+            audio_codec="aac",
+            threads=4
+        )
+        return output_filename
+
+    finally:
+        for _, audio_file, a_clip in downloaded:
+            a_clip.close()
+            if os.path.exists(audio_file):
+                os.remove(audio_file)
+        gc.collect()
+
 
 if __name__ == "__main__":
     for attempt in range(1, MAX_TOP_LEVEL_RETRIES + 1):
         try:
-            generate_video()
+            video_path = generate_video()
+            print(f"تم إنشاء الفيديو بنجاح: {video_path}")
             break
-        except Exception as e:
-            # طبقة حماية إضافية لأي خطأ غير متوقع خارج نطاق try الداخلي
-            log_error(f"تشغيل كامل - محاولة {attempt}/{MAX_TOP_LEVEL_RETRIES}", e)
+        except Exception as err:
+            log_error(f"فشل في التشغيل الرئيسي (محاولة {attempt})", err)
             if attempt == MAX_TOP_LEVEL_RETRIES:
-                notify_telegram_error("فشل نهائي بعد كل المحاولات", e)
-            else:
-                time.sleep(5)
+                notify_telegram_error("التشغيل الرئيسي لإنشاء الفيديو", err)
