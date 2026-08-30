@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import AudioFileClip, ImageSequenceClip, concatenate_videoclips
-from moviepy.audio.fx.all import speedx
+import moviepy.audio.fx.all as afx
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -17,7 +17,6 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 YOUR_NAME = "yazeed"
 
-# إضافة معرفات everyayah كخطة احتياطية للسيرفر الأول
 RECITERS = [
     {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "everyayah_folder": "Minshawy_Murattal_128kbps"},
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary", "everyayah_folder": "Yasser_Ad-Dussary_128kbps"},
@@ -29,23 +28,18 @@ RECITERS = [
 HISTORY_FILE = "history.txt"
 ERROR_LOG_FILE = "error_log.txt"
 
-AYAHS_COUNT = 5           # عدد الآيات الثابت لكل فيديو
-TARGET_DURATION = 30.0    # المدة المستهدفة بالثواني
-DURATION_TOLERANCE_MIN = 24.0
-DURATION_TOLERANCE_MAX = 40.0
+AYAHS_COUNT = 5
+TARGET_DURATION = 30.0
+DURATION_TOLERANCE_MIN = 15.0  # توسيع نطاق القبول لتقليل احتمالية الفشل
+DURATION_TOLERANCE_MAX = 50.0
 SPEED_FACTOR_MIN = 0.8
 SPEED_FACTOR_MAX = 1.35
 
-MAX_BATCH_RETRIES = 6        # عدد محاولات اختيار دفعة آيات صالحة
-MAX_TOP_LEVEL_RETRIES = 2    # عدد محاولات تشغيل السكربت كاملاً
+MAX_BATCH_RETRIES = 6
+MAX_TOP_LEVEL_RETRIES = 2
 
-
-# =========================================================
-#                    نظام تسجيل ومعالجة الأخطاء
-# =========================================================
 
 def log_error(context, exc):
-    """يسجل الخطأ في ملف السجل مع الوقت والتفاصيل الكاملة، بدون إيقاف التنفيذ"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = f"[{ts}] ❌ خطأ في ({context}): {exc}\n{traceback.format_exc()}\n{'-' * 60}\n"
     print(f"⚠️ [{context}] {exc}")
@@ -57,7 +51,6 @@ def log_error(context, exc):
 
 
 def notify_telegram_error(context, exc):
-    """يرسل تنبيهاً نصياً بسيطاً لتيليجرام عند فشل التنفيذ نهائياً بعد كل المحاولات"""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
     try:
@@ -67,26 +60,6 @@ def notify_telegram_error(context, exc):
     except Exception as e:
         log_error("إرسال تنبيه خطأ لتيليجرام", e)
 
-
-def retry(func, *args, context="عملية", retries=3, delay=2, default=None, **kwargs):
-    """منفذ عام يعيد محاولة أي دالة تلقائياً عند حدوث خطأ، مع تأخير متصاعد"""
-    last_exc = None
-    for attempt in range(1, retries + 1):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            last_exc = e
-            log_error(f"{context} - محاولة {attempt}/{retries}", e)
-            if attempt < retries:
-                time.sleep(delay * attempt)
-    if default is not None:
-        return default
-    raise last_exc
-
-
-# =========================================================
-#                          السجل التاريخي
-# =========================================================
 
 def get_viewed_history():
     if os.path.exists(HISTORY_FILE):
@@ -106,10 +79,6 @@ def save_to_history(entry):
         log_error("حفظ السجل", e)
 
 
-# =========================================================
-#                       الخط والنصوص
-# =========================================================
-
 def download_arabic_font():
     font_url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
     font_path = "Amiri-Regular.ttf"
@@ -126,7 +95,7 @@ def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(font_path, 65)
+        font = ImageFont.truetype(font_path, 50)
     except Exception as e:
         log_error("تحميل الخط لإنشاء صورة النص", e)
         font = ImageFont.load_default()
@@ -140,39 +109,14 @@ def create_text_image(text, font_path, width=1080, height=1920):
     return np.array(img)
 
 
-def split_long_text(text, max_words=5):
-    words = text.split()
-    if len(words) <= max_words:
-        return [text]
-
-    chunks = []
-    current_chunk = []
-    for word in words:
-        current_chunk.append(word)
-        if len(current_chunk) >= max_words:
-            chunks.append(" ".join(current_chunk))
-            current_chunk = []
-    if current_chunk:
-        chunks.append(" ".join(current_chunk))
-    return chunks
-
-
-# =========================================================
-#                    جلب بيانات القرآن (5 آيات متتالية)
-# =========================================================
-
 def get_precise_quran_data():
-    """يختار سورة عشوائية ويعيد 5 آيات متتالية لم تُعرض من قبل"""
     history = get_viewed_history()
     reciters_order = RECITERS[:]
     random.shuffle(reciters_order)
 
     for reciter in reciters_order:
-        attempts = 0
-        while attempts < 15:
-            attempts += 1
+        for attempts in range(15):
             surah_num = random.randint(1, 114)
-
             api_url = f"https://api.alquran.cloud/v1/surah/{surah_num}/{reciter['id']}"
             try:
                 r = requests.get(api_url, timeout=20)
@@ -196,9 +140,8 @@ def get_precise_quran_data():
                 save_to_history(history_entry)
                 return selected_ayahs, surah_name, reciter['name'], surah_num, reciter
             except Exception as e:
-                log_error(f"جلب سورة {surah_num} بصوت {reciter['name']} (محاولة {attempts})", e)
+                log_error(f"جلب سورة {surah_num}", e)
                 time.sleep(1)
-                continue
 
     fallback_ayahs = [
         {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "number": 1, "numberInSurah": 1},
@@ -210,14 +153,8 @@ def get_precise_quran_data():
     return fallback_ayahs, "سورة الفاتحة", "الشيخ محمود خليل الحصري", 1, RECITERS[2]
 
 
-# =========================================================
-#                        تحميل الصوت
-# =========================================================
-
 def fetch_audio_file(audio_urls, temp_audio_name):
-    """يحاول تنزيل الصوت من عدة روابط احتياطية بالترتيب"""
     headers = {'User-Agent': 'Mozilla/5.0'}
-
     for url in audio_urls:
         if not url:
             continue
@@ -229,9 +166,8 @@ def fetch_audio_file(audio_urls, temp_audio_name):
                         f.write(r.content)
                     return True
             except requests.exceptions.RequestException as e:
-                log_error(f"تنزيل صوت من {url} (محاولة {attempt + 1}/3)", e)
-                time.sleep(2 * (attempt + 1))
-
+                log_error(f"تنزيل صوت من {url}", e)
+                time.sleep(2)
     return False
 
 
@@ -254,17 +190,9 @@ def build_ayah_urls(ayah, surah_num, reciter_info):
     return audio_urls
 
 
-# =========================================================
-#          تجميع دفعة من 5 آيات صالحة (مع تصحيح ذاتي)
-# =========================================================
-
 def build_ayah_batch():
-    """
-    يحاول عدة مرات جلب 5 آيات وتنزيل صوتها بنجاح، ضمن مدة زمنية طبيعية معقولة.
-    """
     for global_try in range(1, MAX_BATCH_RETRIES + 1):
         ayahs, surah_name, reciter_name, surah_num, reciter_info = get_precise_quran_data()
-
         downloaded = []
         total_raw = 0.0
         batch_success = True
@@ -283,14 +211,13 @@ def build_ayah_batch():
                 total_raw += clip.duration
                 downloaded.append((ayah, temp_audio_name, clip))
             except Exception as e:
-                log_error(f"خطأ في تحميل المقطع الصوتي {temp_audio_name}", e)
+                log_error(f"تحميل المقطع {temp_audio_name}", e)
                 batch_success = False
                 break
 
         if batch_success and (DURATION_TOLERANCE_MIN <= total_raw <= DURATION_TOLERANCE_MAX):
             return downloaded, surah_name, reciter_name, total_raw
 
-        # تنظيف الملفات المؤقتة عند إخفاق الدفعة
         for _, temp_name, clip in downloaded:
             try:
                 clip.close()
@@ -304,10 +231,6 @@ def build_ayah_batch():
     raise RuntimeError("تعذر تجميع دفعة آيات صالحة ضمن حدود المحاولات المسموحة.")
 
 
-# =========================================================
-#                     إنشاء الفيديو
-# =========================================================
-
 def generate_video():
     font_path = download_arabic_font()
     downloaded, surah_name, reciter_name, total_raw = build_ayah_batch()
@@ -320,7 +243,7 @@ def generate_video():
 
     try:
         for ayah, audio_file, a_clip in downloaded:
-            adjusted_audio = speedx(a_clip, factor=speed_factor)
+            adjusted_audio = afx.speedx(a_clip, factor=speed_factor)
             audio_clips.append(adjusted_audio)
 
             display_text = f"{ayah['text']}\n\n[{surah_name} - {reciter_name}]"
@@ -358,6 +281,7 @@ if __name__ == "__main__":
             print(f"تم إنشاء الفيديو بنجاح: {video_path}")
             break
         except Exception as err:
-            log_error(f"فشل في التشغيل الرئيسي (محاولة {attempt})", err)
+            log_error(f"التشغيل الرئيسي (محاولة {attempt})", err)
             if attempt == MAX_TOP_LEVEL_RETRIES:
-                notify_telegram_error("التشغيل الرئيسي لإنشاء الفيديو", err)
+                notify_telegram_error("التشغيل الرئيسي", err)
+                raise err
