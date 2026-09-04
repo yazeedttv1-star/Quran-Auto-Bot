@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 os.system('pip install moviepy==1.0.3')
 
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-from moviepy.audio.fx.speedx import speedx  # المسار الصحيح لـ speedx
+from moviepy.audio.fx.all import speedx  # المسار الصحيح في الإصدار 1.0.3
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -224,7 +224,7 @@ def generate_video():
     for idx, (ayah, filename, clip) in enumerate(downloaded):
         print(f"🎵 معالجة آية {idx+1}/{len(downloaded)}...")
         
-        # تعديل سرعة الصوت باستخدام speedx مباشرة
+        # تعديل سرعة الصوت
         adjusted = speedx(clip, factor=speed)
         audio_clips.append(adjusted)
         
