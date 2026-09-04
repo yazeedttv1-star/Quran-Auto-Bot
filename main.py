@@ -8,19 +8,13 @@ import traceback
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
-# استيراد moviepy - محاولة متعددة للمتوافقية
-try:
-    from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-    import moviepy.audio.fx.all as afx
-except:
-    try:
-        from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, afx
-    except:
-        from moviepy.video.io.VideoFileClip import VideoFileClip
-        from moviepy.audio.io.AudioFileClip import AudioFileClip
-        from moviepy.video.VideoClip import ImageClip
-        from moviepy.video.compositing.concatenate import concatenate_videoclips
-        import moviepy.audio.fx.all as afx
+# ====== طريقة استيراد مضمونة لـ moviepy ======
+# تثبيت إصدار معين يعمل بشكل مضمون
+os.system('pip install moviepy==1.0.3')
+
+# الاستيراد بعد التثبيت
+from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
+import moviepy.audio.fx.all as afx
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -42,9 +36,6 @@ SPEED_FACTOR_MIN = 0.8
 SPEED_FACTOR_MAX = 1.35
 
 # ====== دوال مساعدة ======
-def log_error(context, exc):
-    print(f"❌ خطأ في {context}: {exc}")
-
 def get_viewed_history():
     if os.path.exists(HISTORY_FILE):
         try:
@@ -81,23 +72,23 @@ def create_text_image(text, font_path, width=1080, height=1920):
     
     try:
         if font_path and os.path.exists(font_path):
-            font = ImageFont.truetype(font_path, 60)
+            font = ImageFont.truetype(font_path, 55)
         else:
             font = ImageFont.load_default()
     except:
         font = ImageFont.load_default()
     
-    # تقسيم النص لأسطر متعددة إذا كان طويلاً
+    # تقسيم النص
     lines = text.split('\n')
-    y_offset = height // 2 - (len(lines) * 40)
+    y = height // 2 - (len(lines) * 45)
     
     for line in lines:
-        text_bbox = draw.textbbox((0, 0), line, font=font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        position = ((width - text_width) // 2, y_offset)
-        draw.text(position, line, fill=(255, 255, 255), font=font)
-        y_offset += text_height + 20
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        x = (width - w) // 2
+        draw.text((x, y), line, fill=(255, 255, 255), font=font)
+        y += h + 25
     
     return np.array(img)
 
@@ -131,7 +122,7 @@ def get_quran_data():
                 return selected, data['name'], reciter['name'], surah_num, reciter
                 
             except Exception as e:
-                log_error(f"جلب سورة {surah_num}", e)
+                print(f"⚠️ خطأ في سورة {surah_num}: {e}")
                 time.sleep(1)
     
     # الفاتحة كخيار احتياطي
@@ -176,7 +167,8 @@ def build_audio_urls(ayah, surah_num, reciter):
     return urls
 
 def build_batch():
-    for _ in range(6):
+    for attempt in range(6):
+        print(f"🔄 محاولة {attempt + 1}/6...")
         ayahs, surah_name, reciter_name, surah_num, reciter = get_quran_data()
         downloaded = []
         total = 0.0
@@ -186,7 +178,9 @@ def build_batch():
             filename = f"temp_{i}.mp3"
             urls = build_audio_urls(ayah, surah_num, reciter)
             
+            print(f"  📥 تحميل آية {i+1}/{len(ayahs)}...")
             if not download_audio(urls, filename):
+                print(f"  ❌ فشل تحميل الآية {i+1}")
                 success = False
                 break
             
@@ -194,11 +188,14 @@ def build_batch():
                 clip = AudioFileClip(filename)
                 total += clip.duration
                 downloaded.append((ayah, filename, clip))
-            except:
+                print(f"  ✅ تم تحميل الآية {i+1} (المدة: {clip.duration:.2f}s)")
+            except Exception as e:
+                print(f"  ❌ خطأ في المقطع {i+1}: {e}")
                 success = False
                 break
         
         if success and 15.0 <= total <= 50.0:
+            print(f"✅ تم تحميل {len(downloaded)} آيات بنجاح (المدة الكلية: {total:.2f}s)")
             return downloaded, surah_name, reciter_name, total
         
         # تنظيف
@@ -210,7 +207,7 @@ def build_batch():
                 pass
         gc.collect()
     
-    raise Exception("فشل تحميل الآيات")
+    raise Exception("فشل تحميل الآيات بعد 6 محاولات")
 
 # ====== الوظيفة الرئيسية ======
 def generate_video():
@@ -221,13 +218,14 @@ def generate_video():
     # حساب سرعة الصوت
     speed = total / TARGET_DURATION
     speed = max(SPEED_FACTOR_MIN, min(SPEED_FACTOR_MAX, speed))
+    print(f"⚡ سرعة التشغيل: {speed:.2f}x")
     
     audio_clips = []
     video_data = []
     
-    print(f"🎵 جاري معالجة {len(downloaded)} آيات...")
-    
-    for ayah, filename, clip in downloaded:
+    for idx, (ayah, filename, clip) in enumerate(downloaded):
+        print(f"🎵 معالجة آية {idx+1}/{len(downloaded)}...")
+        
         # تعديل سرعة الصوت
         adjusted = afx.speedx(clip, factor=speed)
         audio_clips.append(adjusted)
@@ -247,20 +245,22 @@ def generate_video():
     # دمج الفيديو
     video_clips = []
     for img, duration in video_data:
-        clip = ImageClip(img).with_duration(duration)
+        clip = ImageClip(img).set_duration(duration)
         video_clips.append(clip)
     
     final_video = concatenate_videoclips(video_clips, method="compose")
-    final_video = final_video.with_audio(final_audio)
+    final_video = final_video.set_audio(final_audio)
     
     # حفظ الفيديو
     output = "quran_video.mp4"
+    print("💾 جاري حفظ الفيديو...")
     final_video.write_videofile(
         output,
         fps=24,
         codec="libx264",
         audio_codec="aac",
         threads=4,
+        verbose=False,
         logger=None
     )
     
@@ -281,20 +281,28 @@ def generate_video():
 # ====== التشغيل ======
 if __name__ == "__main__":
     try:
-        print("🚀 بدء تشغيل البوت...")
-        video = generate_video()
-        print(f"✅ تم إنشاء الفيديو: {video}")
-        print(f"📊 الحجم: {os.path.getsize(video) / (1024*1024):.2f} MB")
+        print("🚀 بدء تشغيل بوت آيات القرآن...")
+        print("="*50)
         
-        # إرسال للتيليجرام إذا كانت الإعدادات موجودة
+        video_path = generate_video()
+        
+        print("="*50)
+        print(f"✅ تم إنشاء الفيديو بنجاح: {video_path}")
+        print(f"📊 حجم الفيديو: {os.path.getsize(video_path) / (1024*1024):.2f} MB")
+        
+        # إرسال للتيليجرام
         if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-            print("📤 جاري الإرسال للتيليجرام...")
+            print("📤 جاري الإرسال إلى تيليجرام...")
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-            with open(video, 'rb') as f:
+            with open(video_path, 'rb') as f:
                 files = {'video': f}
                 data = {'chat_id': TELEGRAM_CHAT_ID}
-                requests.post(url, files=files, data=data, timeout=60)
-            print("✅ تم الإرسال للتيليجرام")
+                response = requests.post(url, files=files, data=data, timeout=60)
+            
+            if response.status_code == 200:
+                print("✅ تم الإرسال إلى تيليجرام بنجاح")
+            else:
+                print(f"⚠️ فشل الإرسال إلى تيليجرام: {response.status_code}")
         
         print("🎉 انتهى التنفيذ بنجاح!")
         
