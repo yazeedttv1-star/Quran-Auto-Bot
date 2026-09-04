@@ -8,13 +8,11 @@ import traceback
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
-# ====== طريقة استيراد مضمونة لـ moviepy ======
-# تثبيت إصدار معين يعمل بشكل مضمون
+# ====== تثبيت واستيراد moviepy ======
 os.system('pip install moviepy==1.0.3')
 
-# الاستيراد بعد التثبيت
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-import moviepy.audio.fx.all as afx
+from moviepy.audio.fx.speedx import speedx  # المسار الصحيح لـ speedx
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -226,8 +224,8 @@ def generate_video():
     for idx, (ayah, filename, clip) in enumerate(downloaded):
         print(f"🎵 معالجة آية {idx+1}/{len(downloaded)}...")
         
-        # تعديل سرعة الصوت
-        adjusted = afx.speedx(clip, factor=speed)
+        # تعديل سرعة الصوت باستخدام speedx مباشرة
+        adjusted = speedx(clip, factor=speed)
         audio_clips.append(adjusted)
         
         # إنشاء صورة النص
