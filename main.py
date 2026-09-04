@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 os.system('pip install moviepy==1.0.3')
 
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-from moviepy.audio.fx.all import speedx  # المسار الصحيح في الإصدار 1.0.3
+import moviepy.audio.fx.speedx as speedx_module  # تعديل مسار الاستيراد المباشر لتجنب ImportError
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -224,8 +224,8 @@ def generate_video():
     for idx, (ayah, filename, clip) in enumerate(downloaded):
         print(f"🎵 معالجة آية {idx+1}/{len(downloaded)}...")
         
-        # تعديل سرعة الصوت
-        adjusted = speedx(clip, factor=speed)
+        # تعديل سرعة الصوت بالطريقة الصحيحة للنسخة 1.0.3
+        adjusted = speedx_module.speedx(clip, factor=speed)
         audio_clips.append(adjusted)
         
         # إنشاء صورة النص
@@ -238,7 +238,11 @@ def generate_video():
     print("🎬 جاري دمج الملفات...")
     
     # دمج الصوت
-    final_audio = concatenate_videoclips(audio_clips)
+    final_audio = concatenate_videoclips(audio_clips) if hasattr(audio_clips[0], 'write_videofile') else None
+    
+    # لتفادي أي أخطاء دمج الصوت مع الفيديو في moviepy استخدم طريقة concatenate الرسمية للأصوات
+    from moviepy.audio.AudioClip import concatenate_audioclips
+    final_audio = concatenate_audioclips(audio_clips)
     
     # دمج الفيديو
     video_clips = []
