@@ -4,21 +4,18 @@ on:
   schedule:
     # يعمل تلقائياً الساعة 5 صباحاً بتوقيت مصر (الساعة 2 صباحاً UTC)
     - cron: '0 2 * * *' 
-  workflow_dispatch: # يتيح لك تشغيل البوت يدوياً بضغطة زر من GitHub
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4.2.2 
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5.3.0 
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
