@@ -7,7 +7,33 @@ import time
 import traceback
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
-from moviepy import AudioFileClip, ImageClip, VideoClip, concatenate_videoclips, afx
+
+# محاولة استيراد moviepy بطريقة متوافقة مع الإصدارات المختلفة
+try:
+    # محاولة الاستيراد من الإصدارات الحديثة (2.x)
+    from moviepy import (
+        AudioFileClip, 
+        ImageClip, 
+        concatenate_videoclips,
+        afx
+    )
+except ImportError:
+    try:
+        # محاولة الاستيراد من الإصدارات القديمة (1.x)
+        from moviepy.editor import (
+            AudioFileClip, 
+            ImageClip, 
+            concatenate_videoclips,
+            afx
+        )
+    except ImportError:
+        # محاولة الاستيراد من المسار القديم الآخر
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+        from moviepy.audio.io.AudioFileClip import AudioFileClip
+        from moviepy.video.VideoClip import ImageClip
+        from moviepy.video.compositing.concatenate import concatenate_videoclips
+        import moviepy.audio.fx.all as afx
+
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
