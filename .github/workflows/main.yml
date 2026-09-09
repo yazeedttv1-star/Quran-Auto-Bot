@@ -1,9 +1,8 @@
-name: Quran Video Bot
+name: Daily Quran Video Bot
 
 on:
   schedule:
-    # تشغيل المهمة كل 5 دقائق (أقل حد مسموح به في GitHub Actions)
-    - cron: '*/5 * * * *'
+    - cron: '0 2 * * *' 
   workflow_dispatch:
 
 jobs:
