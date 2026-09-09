@@ -13,7 +13,6 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
 AYAHS_COUNT = 5
-TARGET_DURATION = 30.0
 
 RECITERS = [
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -123,7 +122,6 @@ def build_batch():
     for _ in range(5):
         ayahs, surah_name, reciter_name, surah_num, reciter = fetch_quran_data()
         downloaded = []
-        total_duration = 0.0
 
         for i, ayah in enumerate(ayahs):
             file_path = f"temp_{i}.mp3"
@@ -131,13 +129,12 @@ def build_batch():
 
             if audio_url and download_audio(audio_url, file_path):
                 clip = AudioFileClip(file_path)
-                total_duration += clip.duration
                 downloaded.append((ayah, file_path, clip))
             else:
                 break
 
         if len(downloaded) == len(ayahs):
-            return downloaded, surah_name, reciter_name, total_duration
+            return downloaded, surah_name, reciter_name
 
         for _, f, c in downloaded:
             c.close()
@@ -148,18 +145,17 @@ def build_batch():
 
 def generate_video():
     font_path = get_font()
-    downloaded, surah_name, reciter_name, total_duration = build_batch()
+    downloaded, surah_name, reciter_name = build_batch()
 
-    speed = max(0.8, min(1.35, total_duration / TARGET_DURATION))
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        adjusted_audio = clip.with_speed_scaled(speed)
-        audio_clips.append(adjusted_audio)
+        # استخدام المقطع الصوتي كما هو بدون تغيير السرعة للحفاظ على جودة الصوت الأصلية
+        audio_clips.append(clip)
 
         text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
         img = create_text_image(text_content, font_path)
-        img_clip = ImageClip(img).with_duration(adjusted_audio.duration)
+        img_clip = ImageClip(img).with_duration(clip.duration)
         video_clips.append(img_clip)
 
     final_audio = concatenate_audioclips(audio_clips)
