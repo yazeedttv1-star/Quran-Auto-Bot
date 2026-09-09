@@ -4,10 +4,8 @@ import random
 import requests
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import arabic_reshaper
-from bidi.algorithm import get_display
 
-# استيرادات MoviePy 2.x الصحيحة
+# استيرادات MoviePy 2.x
 from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, concatenate_audioclips
 
 # --- الإعدادات ---
@@ -45,10 +43,6 @@ def get_font():
             return None
     return font_path
 
-def format_arabic_text(text):
-    reshaped_text = arabic_reshaper.reshape(text)
-    return get_display(reshaped_text)
-
 def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(15, 15, 20))
     draw = ImageDraw.Draw(img)
@@ -59,15 +53,26 @@ def create_text_image(text, font_path, width=1080, height=1920):
         font = ImageFont.load_default()
 
     lines = text.split("\n")
-    formatted_lines = [format_arabic_text(line) for line in lines]
-    
-    y_center = height // 2 - (len(formatted_lines) * 40)
+    y_center = height // 2 - (len(lines) * 40)
 
-    for line in formatted_lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
+    for line in lines:
+        if not line.strip():
+            y_center += 40
+            continue
+            
+        # رسم النص العربي بالاتجاه الصحيح وبدون عكس للحروف
+        bbox = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
-        draw.text((x, y_center), line, fill=(255, 255, 255), font=font)
+        
+        draw.text(
+            (x, y_center), 
+            line, 
+            fill=(255, 255, 255), 
+            font=font, 
+            direction="rtl", 
+            language="ar"
+        )
         y_center += (bbox[3] - bbox[1]) + 30
 
     return np.array(img)
@@ -151,7 +156,6 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # تغيير السرعة عبر الدالة المباشرة المعتمدة في الإصدار الحديث
         adjusted_audio = clip.with_speed_scaled(speed)
         audio_clips.append(adjusted_audio)
 
