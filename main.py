@@ -1,17 +1,15 @@
 import gc
 import os
 import random
-import time
 import requests
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-# استيراد MoviePy بالشكل القياسي الشامل
-from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-from moviepy.audio.AudioClip import concatenate_audioclips
-import moviepy.audio.fx.all as afx
+# استيرادات MoviePy 2.x الحديثة
+from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, concatenate_audioclips
+import moviepy.audio.fx as afx
 
 # --- الإعدادات ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -154,17 +152,17 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # تطبيق تسريع الصوت باستخدام طريقة afx المتوافقة
-        adjusted_audio = clip.fx(afx.speedx, factor=speed)
+        # تطبيق سرعة الصوت في MoviePy 2.x
+        adjusted_audio = clip.with_effects([afx.AudioSpeedX(factor=speed)])
         audio_clips.append(adjusted_audio)
 
         text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
         img = create_text_image(text_content, font_path)
-        img_clip = ImageClip(img).set_duration(adjusted_audio.duration)
+        img_clip = ImageClip(img).with_duration(adjusted_audio.duration)
         video_clips.append(img_clip)
 
     final_audio = concatenate_audioclips(audio_clips)
-    final_video = concatenate_videoclips(video_clips, method="compose").set_audio(final_audio)
+    final_video = concatenate_videoclips(video_clips, method="compose").with_audio(final_audio)
 
     output_path = "quran_video.mp4"
     final_video.write_videofile(
