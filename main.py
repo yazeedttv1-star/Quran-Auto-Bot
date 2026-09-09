@@ -13,7 +13,6 @@ import moviepy.video.fx as vfx
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-TARGET_DURATION = 50.0  # مدة الفيديو المستهدفة ~50 ثانية
 
 RECITERS = [
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -46,7 +45,6 @@ def get_font():
     return font_path
 
 def create_tiktok_chroma_image(ayah_text, surah_name, reciter_name, font_path, width=1080, height=1920):
-    # خلفية سوداء جبارة لمقاس TikTok
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
@@ -57,7 +55,6 @@ def create_tiktok_chroma_image(ayah_text, surah_name, reciter_name, font_path, w
         font_ayah = ImageFont.load_default()
         font_sub = ImageFont.load_default()
 
-    # تقسيم النص الطويل تلقائياً حتى لا يخرج عن جوانب الشاشة
     words = ayah_text.split()
     lines = []
     current_line = []
@@ -73,7 +70,6 @@ def create_tiktok_chroma_image(ayah_text, surah_name, reciter_name, font_path, w
     if current_line:
         lines.append(" ".join(current_line))
 
-    # رسم الآية في المنتصف
     line_height = 85
     y_start = (height // 2) - ((len(lines) * line_height) // 2)
     
@@ -84,13 +80,11 @@ def create_tiktok_chroma_image(ayah_text, surah_name, reciter_name, font_path, w
         draw.text((x, y_start), line, fill=(255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
 
-    # كتابة بيانات السورة والقارئ بتصميم جذاب بأسفل الفيديو
     info_text = f"سورة: {surah_name} | القارئ: {reciter_name}"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
     
-    # إطار بسيط وجمالي
     draw.text((x_info, height - 280), info_text, fill=(200, 200, 200), font=font_sub, direction="rtl", language="ar")
 
     return np.array(img)
@@ -106,12 +100,10 @@ def fetch_quran_data():
             res = requests.get(url, timeout=10).json()
             ayahs = res["data"]["ayahs"]
 
-            # إذا كانت سورة قصيرة (أقل من 10 آيات) آخذ السورة كاملة مهما كانت مدتها
             if len(ayahs) <= 10:
                 selected = ayahs
                 entry = f"full_{surah}_{reciter['id']}"
             else:
-                # إذا كانت سورة طويلة نختار مجموعة آيات عشوائية تقترب مدتها من 50 ثانية
                 start = random.randint(0, len(ayahs) - 5)
                 selected = ayahs[start : start + 6]
                 entry = f"{surah}_{start}_{reciter['id']}"
@@ -138,6 +130,17 @@ def download_audio(url, filename):
     except Exception:
         pass
     return False
+
+def generate_seo_caption(surah_name, reciter_name, first_ayah_text):
+    """إنشاء وصف احترافي للبحث ومحركات اكسبلور (SEO)"""
+    caption = (
+        f"📖 تلاوة خاشعة من سورة {surah_name} بصوت {reciter_name} ✨\n\n"
+        f"قال تعالى: «{first_ayah_text}»\n\n"
+        f"استمع وتدبر الآيات الكريمة، ولا تنسَ دعم المقطع باللإعجاب والمشاركة ليكون شفيقاً لنا يوم القيامة. 🤍\n\n"
+        f"#القران_الكريم #{surah_name.replace(' ', '_')} #{reciter_name.replace(' ', '_')} "
+        f"#تلاوات_خاشعة #قران #راحة_نفسية #fyp #fypシ #viral #foryou #اكسبلور"
+    )
+    return caption
 
 def build_batch():
     for _ in range(5):
@@ -174,9 +177,8 @@ def generate_video():
         audio_clips.append(clip)
 
         img = create_tiktok_chroma_image(ayah['text'], surah_name, reciter_name, font_path)
-        
-        # إنشاء المقطع الصوري وإضافة تأثير ظهور/اختفاء ناعم (Crossfade Effect)
         img_clip = ImageClip(img).with_duration(clip.duration)
+        
         if clip.duration > 0.8:
             img_clip = img_clip.with_effects([
                 vfx.FadeIn(0.4),
@@ -190,7 +192,6 @@ def generate_video():
 
     output_path = "quran_video.mp4"
     
-    # تصدير مناسب لـ TikTok
     final_video.write_videofile(
         output_path, 
         fps=30, 
@@ -207,9 +208,13 @@ def generate_video():
             os.remove(f)
     gc.collect()
 
-    return output_path
+    # إنشاء الوصف المخصص للـ SEO
+    first_ayah_text = downloaded[0][0]['text']
+    caption = generate_seo_caption(surah_name, reciter_name, first_ayah_text)
 
-def send_to_telegram(video_path):
+    return output_path, caption
+
+def send_to_telegram(video_path, caption):
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
@@ -217,7 +222,10 @@ def send_to_telegram(video_path):
                 res = requests.post(
                     url,
                     files={"video": video_file},
-                    data={"chat_id": TELEGRAM_CHAT_ID},
+                    data={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "caption": caption
+                    },
                     timeout=120,
                 )
                 print(f"نتيجة إرسال تيليجرام: {res.status_code}")
@@ -226,9 +234,9 @@ def send_to_telegram(video_path):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو القرآن للتيك توك...")
-        output = generate_video()
-        print(f"✅ تم الانتهاء بنجاح: {output}")
-        send_to_telegram(output)
+        print("🚀 بدء إنشاء فيديو القرآن مع وصف البحث والـ SEO...")
+        output_video, caption_text = generate_video()
+        print(f"✅ تم الانتهاء بنجاح: {output_video}")
+        send_to_telegram(output_video, caption_text)
     except Exception as err:
         print(f"❌ حدث خطأ أثناء التشغيل: {err}")
