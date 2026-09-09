@@ -55,7 +55,6 @@ def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, wid
         font_ayah = ImageFont.load_default()
         font_sub = ImageFont.load_default()
 
-    # كتابة نص الآية في منتصف الشاشة
     bbox = draw.textbbox((0, 0), ayah_text, font=font_ayah, direction="rtl", language="ar")
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
@@ -71,7 +70,6 @@ def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, wid
         language="ar"
     )
 
-    # طباعة اسم السورة والقارئ بالتنسيق المطلوب (سورة: ... | القارئ: ...)
     info_text = f"سورة: {surah_name} | القارئ: {reciter_name}"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
@@ -160,8 +158,57 @@ def generate_video():
 
     audio_clips, video_clips = [], []
 
-    # معالجة كل آية لتعرض بالتتابع مع صوتها
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
         audio_clips.append(clip)
 
         img = create_chroma_text_image(ayah['text'], surah_name, reciter_name, font_path)
+        img_clip = ImageClip(img).with_duration(clip.duration)
+        video_clips.append(img_clip)
+
+    final_audio = concatenate_audioclips(audio_clips)
+    final_video = concatenate_videoclips(video_clips, method="compose").with_audio(final_audio)
+
+    output_path = "quran_video.mp4"
+    
+    # ضوابط متوازنة لاستغراق دقيقة ونصف تقريباً دون أخطاء
+    final_video.write_videofile(
+        output_path, 
+        fps=24, 
+        codec="libx264", 
+        audio_codec="aac", 
+        preset="veryfast"
+    )
+
+    final_video.close()
+    final_audio.close()
+    for _, f, c in downloaded:
+        c.close()
+        if os.path.exists(f):
+            os.remove(f)
+    gc.collect()
+
+    return output_path
+
+def send_to_telegram(video_path):
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+            with open(video_path, "rb") as video_file:
+                res = requests.post(
+                    url,
+                    files={"video": video_file},
+                    data={"chat_id": TELEGRAM_CHAT_ID},
+                    timeout=120,
+                )
+                print(f"نتيجة إرسال تيليجرام: {res.status_code}")
+        else:
+            print("❌ ملف الفيديو غير موجود أو حجمه 0!")
+
+if __name__ == "__main__":
+    try:
+        print("🚀 بدء إنشاء فيديو القرآن...")
+        output = generate_video()
+        print(f"✅ تم الانتهاء بنجاح: {output}")
+        send_to_telegram(output)
+    except Exception as err:
+        print(f"❌ حدث خطأ أثناء التشغيل: {err}")
