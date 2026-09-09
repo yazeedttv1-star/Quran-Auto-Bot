@@ -7,9 +7,8 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-# استيرادات MoviePy 2.x الحديثة
+# استيرادات MoviePy 2.x الصحيحة
 from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, concatenate_audioclips
-import moviepy.audio.fx as afx
 
 # --- الإعدادات ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -152,8 +151,8 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # تطبيق سرعة الصوت في MoviePy 2.x
-        adjusted_audio = clip.with_effects([afx.AudioSpeedX(factor=speed)])
+        # تغيير السرعة عبر الدالة المباشرة المعتمدة في الإصدار الحديث
+        adjusted_audio = clip.with_speed_scaled(speed)
         audio_clips.append(adjusted_audio)
 
         text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
