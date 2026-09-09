@@ -45,7 +45,6 @@ def get_font():
     return font_path
 
 def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, width=1080, height=1920):
-    # خلفية سوداء نقية (شاشة كروما)
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
@@ -56,7 +55,7 @@ def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, wid
         font_ayah = ImageFont.load_default()
         font_sub = ImageFont.load_default()
 
-    # رسم الآية في المنتصف تماماً
+    # كتابة نص الآية في منتصف الشاشة
     bbox = draw.textbbox((0, 0), ayah_text, font=font_ayah, direction="rtl", language="ar")
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
@@ -72,8 +71,8 @@ def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, wid
         language="ar"
     )
 
-    # إضافة معلومات السورة والقارئ بخط صغير أسفل الشاشة
-    info_text = f"سورة {surah_name} | {reciter_name}"
+    # طباعة اسم السورة والقارئ بالتنسيق المطلوب (سورة: ... | القارئ: ...)
+    info_text = f"سورة: {surah_name} | القارئ: {reciter_name}"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
@@ -161,48 +160,8 @@ def generate_video():
 
     audio_clips, video_clips = [], []
 
+    # معالجة كل آية لتعرض بالتتابع مع صوتها
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
         audio_clips.append(clip)
 
-        # إنشاء صورة كروما سوداء مستقلة لكل آية وتزامنها مع وقت قراءتها
         img = create_chroma_text_image(ayah['text'], surah_name, reciter_name, font_path)
-        img_clip = ImageClip(img).with_duration(clip.duration)
-        video_clips.append(img_clip)
-
-    final_audio = concatenate_audioclips(audio_clips)
-    final_video = concatenate_videoclips(video_clips, method="compose").with_audio(final_audio)
-
-    output_path = "quran_video.mp4"
-    final_video.write_videofile(
-        output_path, fps=24, codec="libx264", audio_codec="aac"
-    )
-
-    final_video.close()
-    final_audio.close()
-    for _, f, c in downloaded:
-        c.close()
-        if os.path.exists(f):
-            os.remove(f)
-    gc.collect()
-
-    return output_path
-
-def send_to_telegram(video_path):
-    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-        with open(video_path, "rb") as video_file:
-            requests.post(
-                url,
-                files={"video": video_file},
-                data={"chat_id": TELEGRAM_CHAT_ID},
-                timeout=60,
-            )
-
-if __name__ == "__main__":
-    try:
-        print("🚀 بدء إنشاء فيديو القرآن (ستايل كروما)...")
-        output = generate_video()
-        print(f"✅ تم الانتهاء بنجاح: {output}")
-        send_to_telegram(output)
-    except Exception as err:
-        print(f"❌ حدث خطأ أثناء التشغيل: {err}")
