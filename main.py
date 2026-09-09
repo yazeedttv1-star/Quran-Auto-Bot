@@ -12,7 +12,7 @@ from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, concatenat
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-AYAHS_COUNT = 5
+AYAHS_COUNT = 4
 
 RECITERS = [
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -44,36 +44,48 @@ def get_font():
             return None
     return font_path
 
-def create_text_image(text, font_path, width=1080, height=1920):
-    img = Image.new("RGB", (width, height), color=(15, 15, 20))
+def create_chroma_text_image(ayah_text, surah_name, reciter_name, font_path, width=1080, height=1920):
+    # خلفية سوداء نقية (شاشة كروما)
+    img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
-        font = ImageFont.truetype(font_path, 50) if font_path else ImageFont.load_default()
+        font_ayah = ImageFont.truetype(font_path, 65) if font_path else ImageFont.load_default()
+        font_sub = ImageFont.truetype(font_path, 35) if font_path else ImageFont.load_default()
     except Exception:
-        font = ImageFont.load_default()
+        font_ayah = ImageFont.load_default()
+        font_sub = ImageFont.load_default()
 
-    lines = text.split("\n")
-    y_center = height // 2 - (len(lines) * 40)
+    # رسم الآية في المنتصف تماماً
+    bbox = draw.textbbox((0, 0), ayah_text, font=font_ayah, direction="rtl", language="ar")
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    x = (width - w) // 2
+    y = (height - h) // 2
+    
+    draw.text(
+        (x, y), 
+        ayah_text, 
+        fill=(255, 255, 255), 
+        font=font_ayah, 
+        direction="rtl", 
+        language="ar"
+    )
 
-    for line in lines:
-        if not line.strip():
-            y_center += 40
-            continue
-            
-        bbox = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
-        w = bbox[2] - bbox[0]
-        x = (width - w) // 2
-        
-        draw.text(
-            (x, y_center), 
-            line, 
-            fill=(255, 255, 255), 
-            font=font, 
-            direction="rtl", 
-            language="ar"
-        )
-        y_center += (bbox[3] - bbox[1]) + 30
+    # إضافة معلومات السورة والقارئ بخط صغير أسفل الشاشة
+    info_text = f"سورة {surah_name} | {reciter_name}"
+    bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
+    w_info = bbox_info[2] - bbox_info[0]
+    x_info = (width - w_info) // 2
+    
+    draw.text(
+        (x_info, height - 200), 
+        info_text, 
+        fill=(180, 180, 180), 
+        font=font_sub, 
+        direction="rtl", 
+        language="ar"
+    )
 
     return np.array(img)
 
@@ -150,11 +162,10 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # استخدام المقطع الصوتي كما هو بدون تغيير السرعة للحفاظ على جودة الصوت الأصلية
         audio_clips.append(clip)
 
-        text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
-        img = create_text_image(text_content, font_path)
+        # إنشاء صورة كروما سوداء مستقلة لكل آية وتزامنها مع وقت قراءتها
+        img = create_chroma_text_image(ayah['text'], surah_name, reciter_name, font_path)
         img_clip = ImageClip(img).with_duration(clip.duration)
         video_clips.append(img_clip)
 
@@ -189,7 +200,7 @@ def send_to_telegram(video_path):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو القرآن...")
+        print("🚀 بدء إنشاء فيديو القرآن (ستايل كروما)...")
         output = generate_video()
         print(f"✅ تم الانتهاء بنجاح: {output}")
         send_to_telegram(output)
