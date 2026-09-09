@@ -16,9 +16,11 @@ AYAHS_COUNT = 5
 TARGET_DURATION = 30.0
 
 RECITERS = [
-    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "folder": "Minshawy_Murattal_128kbps"},
-    {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary", "folder": "Yasser_Ad-Dussary_128kbps"},
-    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary", "folder": "Husary_128kbps"},
+    {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
+    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi"},
+    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary"},
+    {"name": "الشيخ حسن صالح", "id": "ar.hassansaleh"},
+    {"name": "الشيخ محمود علي البنا", "id": "ar.mahmoudalibanna"},
 ]
 
 def load_history():
@@ -60,7 +62,6 @@ def create_text_image(text, font_path, width=1080, height=1920):
             y_center += 40
             continue
             
-        # رسم النص العربي بالاتجاه الصحيح وبدون عكس للحروف
         bbox = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
@@ -126,12 +127,9 @@ def build_batch():
 
         for i, ayah in enumerate(ayahs):
             file_path = f"temp_{i}.mp3"
-            audio_url = ayah.get("audio") or (
-                f"https://www.everyayah.com/data/{reciter['folder']}/"
-                f"{str(surah_num).zfill(3)}{str(ayah.get('numberInSurah', i+1)).zfill(3)}.mp3"
-            )
+            audio_url = ayah.get("audio")
 
-            if download_audio(audio_url, file_path):
+            if audio_url and download_audio(audio_url, file_path):
                 clip = AudioFileClip(file_path)
                 total_duration += clip.duration
                 downloaded.append((ayah, file_path, clip))
