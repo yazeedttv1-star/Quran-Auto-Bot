@@ -59,7 +59,7 @@ def create_static_info_image(surah_name, reciter_name, font_path, width=540, hei
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
     
-    # كتابة المعلومات ثابته بالأسفل
+    # كتابة المعلومات ثابتة بالأسفل
     draw.text((x_info, height - 120), info_text, fill=(200, 200, 200, 255), font=font_sub, direction="rtl", language="ar")
 
     return np.array(img)
@@ -143,7 +143,7 @@ def download_audio(url, filename):
         pass
     return False
 
-# كتابة السكريبت / الوصف بالتنسيق المطلوب بالضبط
+# كتابة السكريبت / الوصف بدون أي هاشتاجات
 def generate_tiktok_script(surah_name, reciter_name, duration_sec):
     minutes = int(duration_sec // 60)
     seconds = int(duration_sec % 60)
@@ -151,9 +151,7 @@ def generate_tiktok_script(surah_name, reciter_name, duration_sec):
 
     caption = (
         f"سورة {surah_name} | {duration_str}\n"
-        f"القارئ {reciter_name}\n\n"
-        f"#القران_الكريم #{surah_name.replace(' ', '_')} #{reciter_name.replace(' ', '_')} "
-        f"#تلاوات_خاشعة #قران #راحة_نفسية #fyp #viral #foryou #اكسبلور"
+        f"القارئ {reciter_name}"
     )
     return caption
 
@@ -175,96 +173,4 @@ def build_batch():
         if len(downloaded) == len(ayahs):
             return downloaded, surah_name, reciter_name
 
-        for _, f, c in downloaded:
-            c.close()
-            if os.path.exists(f):
-                os.remove(f)
-
-    raise Exception("فشل تحميل المقطع الصوتي.")
-
-def generate_video():
-    font_path = get_font()
-    downloaded, surah_name, reciter_name = build_batch()
-
-    audio_clips = []
-    ayah_clips = []
-
-    # 1. تجهيز المقاطع الصوتية ونصوص الآيات بمؤثر خفيف لكل آية
-    for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        audio_clips.append(clip)
-
-        # صورة الآية الشفافة
-        ayah_img = create_ayah_text_image(ayah['text'], font_path)
-        ayah_clip = ImageClip(ayah_img).with_duration(clip.duration)
-        
-        # إضافة مؤثر خفيف (FadeIn و FadeOut) للآية فقط
-        if clip.duration > 0.6:
-            ayah_clip = ayah_clip.with_effects([
-                vfx.FadeIn(0.3),
-                vfx.FadeOut(0.3)
-            ])
-            
-        ayah_clips.append(ayah_clip)
-
-    final_audio = concatenate_audioclips(audio_clips)
-    total_duration = final_audio.duration
-
-    # 2. إنشاء خلفية ثابتة تحتوي على اسم السورة والقارئ طوال مدة الفيديو
-    static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
-    background_clip = ImageClip(static_info_img).with_duration(total_duration)
-
-    # 3. تجميع نصوص الآيات المتتابعة فوق الخلفية الثابتة
-    concat_ayahs = concatenate_videoclips(ayah_clips, method="compose")
-    final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_audio(final_audio)
-
-    output_path = "quran_video.mp4"
-    
-    # تصدير أسرع بطلب السيرفر
-    final_video.write_videofile(
-        output_path, 
-        fps=15, 
-        codec="libx264", 
-        audio_codec="aac", 
-        preset="ultrafast",
-        threads=4,
-        logger=None
-    )
-
-    final_video.close()
-    final_audio.close()
-    background_clip.close()
-    for _, f, c in downloaded:
-        c.close()
-        if os.path.exists(f):
-            os.remove(f)
-    gc.collect()
-
-    # توليد الوصف/السكريبت المخصص للتيليجرام وتيك توك
-    caption = generate_tiktok_script(surah_name, reciter_name, total_duration)
-
-    return output_path, caption
-
-def send_to_telegram(video_path, caption):
-    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-            with open(video_path, "rb") as video_file:
-                res = requests.post(
-                    url,
-                    files={"video": video_file},
-                    data={
-                        "chat_id": TELEGRAM_CHAT_ID,
-                        "caption": caption
-                    },
-                    timeout=120,
-                )
-                print(f"نتيجة إرسال تيليجرام: {res.status_code}")
-
-if __name__ == "__main__":
-    try:
-        print("🚀 بدء إنشاء فيديو القرآن للتيك توك...")
-        output_video, caption_text = generate_video()
-        print(f"✅ تم الانتهاء بنجاح: {output_video}")
-        send_to_telegram(output_video, caption_text)
-    except Exception as err:
-        print(f"❌ حدث خطأ أثناء التشغيل: {err}")
+        for _, f
