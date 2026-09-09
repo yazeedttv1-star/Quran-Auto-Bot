@@ -6,7 +6,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 # استيرادات MoviePy 2.x
-from moviepy import AudioFileClip, ImageClip, concatenate_videoclips, concatenate_audioclips
+from moviepy import AudioFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips, concatenate_audioclips
+import moviepy.video.fx as vfx
 
 # --- الإعدادات ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -43,17 +44,35 @@ def get_font():
             return None
     return font_path
 
-# أبعاد خفيفة جداً وسريعة للغاية بنفس نسبة تيك توك 9:16
-def create_fast_tiktok_image(ayah_text, surah_name, reciter_name, font_path, width=540, height=960):
-    img = Image.new("RGB", (width, height), color=(0, 0, 0))
+# 1. صورة ثابتة لاسم السورة والقارئ فقط (تظهر في الخلفية طوال الفيديو)
+def create_static_info_image(surah_name, reciter_name, font_path, width=540, height=960):
+    img = Image.new("RGBA", (width, height), color=(0, 0, 0, 255))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        font_sub = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
+    except Exception:
+        font_sub = ImageFont.load_default()
+
+    info_text = f"سورة {surah_name} | القارئ {reciter_name}"
+    bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
+    w_info = bbox_info[2] - bbox_info[0]
+    x_info = (width - w_info) // 2
+    
+    # كتابة المعلومات ثابته بالأسفل
+    draw.text((x_info, height - 120), info_text, fill=(200, 200, 200, 255), font=font_sub, direction="rtl", language="ar")
+
+    return np.array(img)
+
+# 2. صورة نص الآية فقط (بشفافية لتوضع فوق الخلفية الثابتة)
+def create_ayah_text_image(ayah_text, font_path, width=540, height=960):
+    img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
         font_ayah = ImageFont.truetype(font_path, 32) if font_path else ImageFont.load_default()
-        font_sub = ImageFont.truetype(font_path, 20) if font_path else ImageFont.load_default()
     except Exception:
         font_ayah = ImageFont.load_default()
-        font_sub = ImageFont.load_default()
 
     words = ayah_text.split()
     lines = []
@@ -77,15 +96,8 @@ def create_fast_tiktok_image(ayah_text, surah_name, reciter_name, font_path, wid
         bbox = draw.textbbox((0, 0), line, font=font_ayah, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
-        draw.text((x, y_start), line, fill=(255, 255, 255), font=font_ayah, direction="rtl", language="ar")
+        draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
-
-    info_text = f"سورة: {surah_name} | القارئ: {reciter_name}"
-    bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
-    w_info = bbox_info[2] - bbox_info[0]
-    x_info = (width - w_info) // 2
-    
-    draw.text((x_info, height - 120), info_text, fill=(180, 180, 180), font=font_sub, direction="rtl", language="ar")
 
     return np.array(img)
 
@@ -131,13 +143,19 @@ def download_audio(url, filename):
         pass
     return False
 
-def generate_seo_caption(surah_name, reciter_name, first_ayah_text):
-    return (
-        f"📖 تلاوة خاشعة من سورة {surah_name} بصوت {reciter_name} ✨\n\n"
-        f"قال تعالى: «{first_ayah_text}»\n\n"
+# كتابة السكريبت / الوصف بالتنسيق المطلوب بالضبط
+def generate_tiktok_script(surah_name, reciter_name, duration_sec):
+    minutes = int(duration_sec // 60)
+    seconds = int(duration_sec % 60)
+    duration_str = f"{seconds} ثانية" if minutes == 0 else f"{minutes}:{seconds:02d} دقيقة"
+
+    caption = (
+        f"سورة {surah_name} | {duration_str}\n"
+        f"القارئ {reciter_name}\n\n"
         f"#القران_الكريم #{surah_name.replace(' ', '_')} #{reciter_name.replace(' ', '_')} "
-        f"#تلاوات_خاشعة #قران #راحة_نفسية #fyp #fypシ #viral #foryou #اكسبلور"
+        f"#تلاوات_خاشعة #قران #راحة_نفسية #fyp #viral #foryou #اكسبلور"
     )
+    return caption
 
 def build_batch():
     for _ in range(5):
@@ -168,20 +186,40 @@ def generate_video():
     font_path = get_font()
     downloaded, surah_name, reciter_name = build_batch()
 
-    audio_clips, video_clips = [], []
+    audio_clips = []
+    ayah_clips = []
 
+    # 1. تجهيز المقاطع الصوتية ونصوص الآيات بمؤثر خفيف لكل آية
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
         audio_clips.append(clip)
-        img = create_fast_tiktok_image(ayah['text'], surah_name, reciter_name, font_path)
-        img_clip = ImageClip(img).with_duration(clip.duration)
-        video_clips.append(img_clip)
+
+        # صورة الآية الشفافة
+        ayah_img = create_ayah_text_image(ayah['text'], font_path)
+        ayah_clip = ImageClip(ayah_img).with_duration(clip.duration)
+        
+        # إضافة مؤثر خفيف (FadeIn و FadeOut) للآية فقط
+        if clip.duration > 0.6:
+            ayah_clip = ayah_clip.with_effects([
+                vfx.FadeIn(0.3),
+                vfx.FadeOut(0.3)
+            ])
+            
+        ayah_clips.append(ayah_clip)
 
     final_audio = concatenate_audioclips(audio_clips)
-    final_video = concatenate_videoclips(video_clips, method="compose").with_audio(final_audio)
+    total_duration = final_audio.duration
+
+    # 2. إنشاء خلفية ثابتة تحتوي على اسم السورة والقارئ طوال مدة الفيديو
+    static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
+    background_clip = ImageClip(static_info_img).with_duration(total_duration)
+
+    # 3. تجميع نصوص الآيات المتتابعة فوق الخلفية الثابتة
+    concat_ayahs = concatenate_videoclips(ayah_clips, method="compose")
+    final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_audio(final_audio)
 
     output_path = "quran_video.mp4"
     
-    # تصدير فائق السرعة واستغلال كامل موارد المعالج
+    # تصدير أسرع بطلب السيرفر
     final_video.write_videofile(
         output_path, 
         fps=15, 
@@ -194,14 +232,15 @@ def generate_video():
 
     final_video.close()
     final_audio.close()
+    background_clip.close()
     for _, f, c in downloaded:
         c.close()
         if os.path.exists(f):
             os.remove(f)
     gc.collect()
 
-    first_ayah_text = downloaded[0][0]['text']
-    caption = generate_seo_caption(surah_name, reciter_name, first_ayah_text)
+    # توليد الوصف/السكريبت المخصص للتيليجرام وتيك توك
+    caption = generate_tiktok_script(surah_name, reciter_name, total_duration)
 
     return output_path, caption
 
@@ -223,7 +262,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("⚡ بدء إنشاء الفيديو بالطريقة السريعة جداً...")
+        print("🚀 بدء إنشاء فيديو القرآن للتيك توك...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الانتهاء بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
