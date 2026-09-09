@@ -1,15 +1,17 @@
+import gc
 import os
 import random
+import time
 import requests
 import numpy as np
-import gc
-import time
 from PIL import Image, ImageDraw, ImageFont
+import arabic_reshaper
+from bidi.algorithm import get_display
 
-# استيرادات MoviePy v1.x القياسية
+# استيراد MoviePy بالشكل القياسي الشامل
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
-from moviepy.audio.fx.speedx import speedx
 from moviepy.audio.AudioClip import concatenate_audioclips
+import moviepy.audio.fx.all as afx
 
 # --- الإعدادات ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -46,19 +48,25 @@ def get_font():
             return None
     return font_path
 
+def format_arabic_text(text):
+    reshaped_text = arabic_reshaper.reshape(text)
+    return get_display(reshaped_text)
+
 def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(15, 15, 20))
     draw = ImageDraw.Draw(img)
 
     try:
-        font = ImageFont.truetype(font_path, 48) if font_path else ImageFont.load_default()
+        font = ImageFont.truetype(font_path, 50) if font_path else ImageFont.load_default()
     except Exception:
         font = ImageFont.load_default()
 
     lines = text.split("\n")
-    y_center = height // 2 - (len(lines) * 40)
+    formatted_lines = [format_arabic_text(line) for line in lines]
+    
+    y_center = height // 2 - (len(formatted_lines) * 40)
 
-    for line in lines:
+    for line in formatted_lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
@@ -146,8 +154,8 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # تطبيق تسريع/تبطيء الصوت عبر speedx
-        adjusted_audio = clip.fx(speedx, speed)
+        # تطبيق تسريع الصوت باستخدام طريقة afx المتوافقة
+        adjusted_audio = clip.fx(afx.speedx, factor=speed)
         audio_clips.append(adjusted_audio)
 
         text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
