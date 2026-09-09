@@ -1,14 +1,15 @@
-import gc
 import os
 import random
-import time
 import requests
+import numpy as np
+import gc
+import time
 from PIL import Image, ImageDraw, ImageFont
 
-# استيرادات MoviePy الحديثة
-from moviepy.audio.AudioClip import concatenate_audioclips
-from moviepy.audio.fx.AudioSpeedX import AudioSpeedX
+# استيرادات MoviePy v1.x القياسية
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
+from moviepy.audio.fx.speedx import speedx
+from moviepy.audio.AudioClip import concatenate_audioclips
 
 # --- الإعدادات ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,23 +19,10 @@ AYAHS_COUNT = 5
 TARGET_DURATION = 30.0
 
 RECITERS = [
-    {
-        "name": "الشيخ محمد صديق المنشاوي",
-        "id": "ar.minshawi",
-        "folder": "Minshawy_Murattal_128kbps",
-    },
-    {
-        "name": "الشيخ ياسر الدوسري",
-        "id": "ar.yasseraddussary",
-        "folder": "Yasser_Ad-Dussary_128kbps",
-    },
-    {
-        "name": "الشيخ محمود خليل الحصري",
-        "id": "ar.husary",
-        "folder": "Husary_128kbps",
-    },
+    {"name": "الشيخ محمد صديق المنشاوي", "id": "ar.minshawi", "folder": "Minshawy_Murattal_128kbps"},
+    {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary", "folder": "Yasser_Ad-Dussary_128kbps"},
+    {"name": "الشيخ محمود خليل الحصري", "id": "ar.husary", "folder": "Husary_128kbps"},
 ]
-
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -42,11 +30,9 @@ def load_history():
             return set(line.strip() for line in f if line.strip())
     return set()
 
-
 def save_history(entry):
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"{entry}\n")
-
 
 def get_font():
     font_path = "Amiri-Regular.ttf"
@@ -60,17 +46,12 @@ def get_font():
             return None
     return font_path
 
-
 def create_text_image(text, font_path, width=1080, height=1920):
     img = Image.new("RGB", (width, height), color=(15, 15, 20))
     draw = ImageDraw.Draw(img)
 
     try:
-        font = (
-            ImageFont.truetype(font_path, 48)
-            if font_path
-            else ImageFont.load_default()
-        )
+        font = ImageFont.truetype(font_path, 48) if font_path else ImageFont.load_default()
     except Exception:
         font = ImageFont.load_default()
 
@@ -84,8 +65,7 @@ def create_text_image(text, font_path, width=1080, height=1920):
         draw.text((x, y_center), line, fill=(255, 255, 255), font=font)
         y_center += (bbox[3] - bbox[1]) + 30
 
-    return img
-
+    return np.array(img)
 
 def fetch_quran_data():
     history = load_history()
@@ -111,13 +91,11 @@ def fetch_quran_data():
         except Exception:
             continue
 
-    # Fallback Data
     fallback_ayahs = [
         {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "number": 1},
         {"text": "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "number": 2},
     ]
     return fallback_ayahs, "الفاتحة", RECITERS[0]["name"], 1, RECITERS[0]
-
 
 def download_audio(url, filename):
     try:
@@ -129,7 +107,6 @@ def download_audio(url, filename):
     except Exception:
         pass
     return False
-
 
 def build_batch():
     for _ in range(5):
@@ -154,14 +131,12 @@ def build_batch():
         if len(downloaded) == len(ayahs):
             return downloaded, surah_name, reciter_name, total_duration
 
-        # Clean-up failed attempt
         for _, f, c in downloaded:
             c.close()
             if os.path.exists(f):
                 os.remove(f)
 
-    raise Exception("فشل تحميل الشريحة الصوتية المطلوب إنشاء الفيديو لها.")
-
+    raise Exception("فشل تحميل المقطع الصوتي.")
 
 def generate_video():
     font_path = get_font()
@@ -171,28 +146,23 @@ def generate_video():
     audio_clips, video_clips = [], []
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # ضبط سرعة الصوت
-        speed_fx = AudioSpeedX(factor=speed)
-        adjusted_audio = speed_fx.apply(clip)
+        # تطبيق تسريع/تبطيء الصوت عبر speedx
+        adjusted_audio = clip.fx(speedx, speed)
         audio_clips.append(adjusted_audio)
 
-        # تحضير مقطع الفيديو
         text_content = f"{ayah['text']}\n\nسورة {surah_name}\nالقارئ: {reciter_name}"
         img = create_text_image(text_content, font_path)
         img_clip = ImageClip(img).set_duration(adjusted_audio.duration)
         video_clips.append(img_clip)
 
     final_audio = concatenate_audioclips(audio_clips)
-    final_video = concatenate_videoclips(
-        video_clips, method="compose"
-    ).set_audio(final_audio)
+    final_video = concatenate_videoclips(video_clips, method="compose").set_audio(final_audio)
 
     output_path = "quran_video.mp4"
     final_video.write_videofile(
         output_path, fps=24, codec="libx264", audio_codec="aac"
     )
 
-    # تنظيف الموارد
     final_video.close()
     final_audio.close()
     for _, f, c in downloaded:
@@ -202,7 +172,6 @@ def generate_video():
     gc.collect()
 
     return output_path
-
 
 def send_to_telegram(video_path):
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
@@ -214,7 +183,6 @@ def send_to_telegram(video_path):
                 data={"chat_id": TELEGRAM_CHAT_ID},
                 timeout=60,
             )
-
 
 if __name__ == "__main__":
     try:
