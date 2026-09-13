@@ -48,7 +48,7 @@ def get_font():
     return font_path
 
 def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
-    img = Image.new("RGBA", (width, height), color=(0, 0, 0, 255))
+    img = Image.new("RGB", (width, height), color=(15, 15, 15))
     draw = ImageDraw.Draw(img)
 
     try:
@@ -60,7 +60,7 @@ def create_static_info_image(surah_name, reciter_name, font_path, width=720, hei
 
     bbox_user = draw.textbbox((0, 0), TIKTOK_USERNAME, font=font_user)
     w_user = bbox_user[2] - bbox_user[0]
-    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180, 180), font=font_user)
+    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180), font=font_user)
 
     info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
@@ -72,12 +72,12 @@ def create_static_info_image(surah_name, reciter_name, font_path, width=720, hei
     draw.rounded_rectangle(
         [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
         radius=10,
-        fill=(20, 20, 20, 180),
-        outline=(255, 255, 255, 50),
+        fill=(30, 30, 30),
+        outline=(255, 255, 255),
         width=1
     )
     
-    draw.text((x_info, y_position), info_text, fill=(230, 230, 230, 255), font=font_sub, direction="rtl", language="ar")
+    draw.text((x_info, y_position), info_text, fill=(230, 230, 230), font=font_sub, direction="rtl", language="ar")
     return np.array(img)
 
 def create_ayah_text_image(ayah_text, font_path, width=720, height=1280):
@@ -191,7 +191,6 @@ def build_batch():
                     downloaded.append((ayah, file_path, clip))
                     current_duration += clip.duration
 
-                    # جمع آيات تكفي لقطع 50 ثانية منها
                     if current_duration >= EXACT_DURATION:
                         break
                 except Exception:
@@ -238,7 +237,6 @@ def generate_video():
             
         ayah_clips.append(ayah_clip)
 
-    # 1. تجميع المقاطع وقص الصوت والفيديو بدقة متناهية عند 50.0 ثانية
     full_audio = concatenate_audioclips(audio_clips)
     final_audio = full_audio.subclipped(0, EXACT_DURATION)
 
@@ -246,18 +244,18 @@ def generate_video():
     background_clip = ImageClip(static_info_img).with_duration(EXACT_DURATION)
 
     concat_ayahs = concatenate_videoclips(ayah_clips, method="compose").subclipped(0, EXACT_DURATION)
-    
-    # 2. إنشاء الفيديو النهائي وتثبيت مدته بالكامل على 50 ثانية
     final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_duration(EXACT_DURATION).with_audio(final_audio)
 
     output_path = "quran_video.mp4"
     
+    # تحسين التصدير لتوافق اختيار الغلاف في تيك توك
     final_video.write_videofile(
         output_path, 
         fps=20, 
         codec="libx264", 
         audio_codec="aac", 
         preset="ultrafast",
+        ffmpeg_params=["-pix_fmt", "yuv420p"],
         threads=4,
         logger=None
     )
@@ -290,7 +288,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو مدته 50 ثانية بالضبط (صوت وصورة)...")
+        print("🚀 بدء إنشاء فيديو متوافق مع غلاف تيك توك مدته 50 ثانية...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
