@@ -122,7 +122,7 @@ def fetch_quran_data():
     history = load_history()
     reciter = random.choice(RECITERS)
 
-    for _ in range(25):
+    for _ in range(30):
         surah = random.randint(1, 114)
         try:
             url = f"https://api.alquran.cloud/v1/surah/{surah}/{reciter['id']}"
@@ -159,10 +159,10 @@ def download_single_audio(args):
     return index, None
 
 def build_batch():
-    for _ in range(5):
+    # محاولة جلب فيديو ناجح حتى 10 مرات؛ إذا فشلت سورة يتم الانتقال لأخرى تلقائياً
+    for _ in range(10):
         ayahs, surah_name, reciter_name = fetch_quran_data()
         
-        # اختيار الآيات المطلوبة لتصل لـ 50 ثانية أولاً
         selected_ayahs = []
         urls_to_download = []
         
@@ -170,10 +170,9 @@ def build_batch():
             if ayah.get("audio"):
                 selected_ayahs.append(ayah)
                 urls_to_download.append((i, ayah["audio"]))
-            if len(selected_ayahs) >= 12: # الحد الأقصى التقريبي لـ 50 ثانية
+            if len(selected_ayahs) >= 12:
                 break
 
-        # تنزيل جميع مقاطع الصوت دفعة واحدة بالتوازي (تسريع عملية التحميل)
         downloaded_files = {}
         with ThreadPoolExecutor(max_workers=5) as executor:
             results = executor.map(download_single_audio, urls_to_download)
@@ -183,28 +182,39 @@ def build_batch():
 
         downloaded = []
         current_duration = 0.0
+        success = True
 
         for i, ayah in enumerate(selected_ayahs):
             if i in downloaded_files:
                 file_path = downloaded_files[i]
-                clip = AudioFileClip(file_path)
-                downloaded.append((ayah, file_path, clip))
-                current_duration += clip.duration
+                try:
+                    clip = AudioFileClip(file_path)
+                    downloaded.append((ayah, file_path, clip))
+                    current_duration += clip.duration
 
-                if current_duration >= TARGET_DURATION:
+                    if current_duration >= TARGET_DURATION:
+                        break
+                except Exception:
+                    success = False
                     break
             else:
+                success = False
                 break
 
-        if len(downloaded) > 0:
+        # إذا نجح تحميل المقاطع الصوتية كاملة للآيات، يتم إرجاعها
+        if success and len(downloaded) > 0:
             return downloaded, surah_name, reciter_name
 
+        # في حال وجود أي خطأ في التحميل، يتم تنظيف الملفات المؤقتة وإعادة المحاولة بسورة أخرى
         for _, f, c in downloaded:
-            c.close()
+            try:
+                c.close()
+            except Exception:
+                pass
             if os.path.exists(f):
                 os.remove(f)
 
-    raise Exception("فشل تحميل المقطع الصوتي.")
+    raise Exception("تعذر جلب مقطع صالح، تم تجاوز المحاولات.")
 
 def generate_tiktok_script(surah_name, reciter_name, duration_sec):
     minutes = int(duration_sec // 60)
@@ -245,7 +255,6 @@ def generate_video():
 
     output_path = "quran_video.mp4"
     
-    # التصدير بـ 20 إطار في الثانية وبأعلى أداء (Ultrafast) اختصاراً للوقت
     final_video.write_videofile(
         output_path, 
         fps=20, 
@@ -283,7 +292,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء الفيديو السريع...")
+        print("🚀 بدء إنشاء المقطع واختيار سورة جديدة تلقائياً...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
