@@ -14,7 +14,7 @@ import moviepy.video.fx as vfx
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-TARGET_DURATION = 50.0
+EXACT_DURATION = 50.0  # مدة الفيديو والصوت إجمالياً 50 ثانية بالضبط
 TIKTOK_USERNAME = "@a.m_4.4"
 
 RECITERS = [
@@ -159,7 +159,6 @@ def download_single_audio(args):
     return index, None
 
 def build_batch():
-    # محاولة جلب فيديو ناجح حتى 10 مرات؛ إذا فشلت سورة يتم الانتقال لأخرى تلقائياً
     for _ in range(10):
         ayahs, surah_name, reciter_name = fetch_quran_data()
         
@@ -170,7 +169,7 @@ def build_batch():
             if ayah.get("audio"):
                 selected_ayahs.append(ayah)
                 urls_to_download.append((i, ayah["audio"]))
-            if len(selected_ayahs) >= 12:
+            if len(selected_ayahs) >= 15:
                 break
 
         downloaded_files = {}
@@ -192,7 +191,8 @@ def build_batch():
                     downloaded.append((ayah, file_path, clip))
                     current_duration += clip.duration
 
-                    if current_duration >= TARGET_DURATION:
+                    # جمع آيات تكفي لقطع 50 ثانية منها
+                    if current_duration >= EXACT_DURATION:
                         break
                 except Exception:
                     success = False
@@ -201,11 +201,9 @@ def build_batch():
                 success = False
                 break
 
-        # إذا نجح تحميل المقاطع الصوتية كاملة للآيات، يتم إرجاعها
-        if success and len(downloaded) > 0:
+        if success and len(downloaded) > 0 and current_duration >= EXACT_DURATION:
             return downloaded, surah_name, reciter_name
 
-        # في حال وجود أي خطأ في التحميل، يتم تنظيف الملفات المؤقتة وإعادة المحاولة بسورة أخرى
         for _, f, c in downloaded:
             try:
                 c.close()
@@ -214,14 +212,10 @@ def build_batch():
             if os.path.exists(f):
                 os.remove(f)
 
-    raise Exception("تعذر جلب مقطع صالح، تم تجاوز المحاولات.")
+    raise Exception("تعذر جلب مقطع يتجاوز 50 ثانية.")
 
-def generate_tiktok_script(surah_name, reciter_name, duration_sec):
-    minutes = int(duration_sec // 60)
-    seconds = int(duration_sec % 60)
-    duration_str = f"{seconds} ثانية" if minutes == 0 else f"{minutes}:{seconds:02d} دقيقة"
-
-    return f"سورة {surah_name} | {duration_str}\nالقارئ {reciter_name}"
+def generate_tiktok_script(surah_name, reciter_name):
+    return f"سورة {surah_name} | 50 ثانية\nالقارئ {reciter_name}"
 
 def generate_video():
     font_path = get_font()
@@ -244,14 +238,17 @@ def generate_video():
             
         ayah_clips.append(ayah_clip)
 
-    final_audio = concatenate_audioclips(audio_clips)
-    total_duration = final_audio.duration
+    # 1. تجميع المقاطع وقص الصوت والفيديو بدقة متناهية عند 50.0 ثانية
+    full_audio = concatenate_audioclips(audio_clips)
+    final_audio = full_audio.subclipped(0, EXACT_DURATION)
 
     static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
-    background_clip = ImageClip(static_info_img).with_duration(total_duration)
+    background_clip = ImageClip(static_info_img).with_duration(EXACT_DURATION)
 
-    concat_ayahs = concatenate_videoclips(ayah_clips, method="compose")
-    final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_audio(final_audio)
+    concat_ayahs = concatenate_videoclips(ayah_clips, method="compose").subclipped(0, EXACT_DURATION)
+    
+    # 2. إنشاء الفيديو النهائي وتثبيت مدته بالكامل على 50 ثانية
+    final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_duration(EXACT_DURATION).with_audio(final_audio)
 
     output_path = "quran_video.mp4"
     
@@ -267,6 +264,7 @@ def generate_video():
 
     final_video.close()
     final_audio.close()
+    full_audio.close()
     background_clip.close()
     for _, f, c in downloaded:
         c.close()
@@ -274,7 +272,7 @@ def generate_video():
             os.remove(f)
     gc.collect()
 
-    caption = generate_tiktok_script(surah_name, reciter_name, total_duration)
+    caption = generate_tiktok_script(surah_name, reciter_name)
 
     return output_path, caption
 
@@ -292,7 +290,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء المقطع واختيار سورة جديدة تلقائياً...")
+        print("🚀 بدء إنشاء فيديو مدته 50 ثانية بالضبط (صوت وصورة)...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
