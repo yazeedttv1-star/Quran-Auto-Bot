@@ -13,7 +13,7 @@ import moviepy.video.fx as vfx
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-TARGET_DURATION = 50.0  # المستهدف 50 ثانية
+TARGET_DURATION = 50.0  # مدة الفيديو 50 ثانية
 
 RECITERS = [
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -45,30 +45,45 @@ def get_font():
             return None
     return font_path
 
-def create_static_info_image(surah_name, reciter_name, font_path, width=540, height=960):
+# صورة اسم السورة والقارئ ثابته ومصممة بدقة لتناسب منطقة أمان تيك توك (TikTok Safe Zone)
+def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 255))
     draw = ImageDraw.Draw(img)
 
     try:
-        font_sub = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
+        font_sub = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
     except Exception:
         font_sub = ImageFont.load_default()
 
-    info_text = f"سورة {surah_name} | القارئ {reciter_name}"
+    info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
     
-    draw.text((x_info, height - 120), info_text, fill=(200, 200, 200, 255), font=font_sub, direction="rtl", language="ar")
+    # يوضع النص بارتفاع مناسب فوق أزرار التيك توك السفلى (تجنباً للتغطية)
+    y_position = height - 220
+    
+    # إطار خفيف جمالي خلف اسم السورة والقارئ
+    padding = 15
+    draw.rounded_rectangle(
+        [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
+        radius=10,
+        fill=(20, 20, 20, 180),
+        outline=(255, 255, 255, 50),
+        width=1
+    )
+    
+    draw.text((x_info, y_position), info_text, fill=(230, 230, 230, 255), font=font_sub, direction="rtl", language="ar")
 
     return np.array(img)
 
-def create_ayah_text_image(ayah_text, font_path, width=540, height=960):
+# صورة الآية القرآنية مصممة بخط أوضح ومجهزة للتيك توك
+def create_ayah_text_image(ayah_text, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
-        font_ayah = ImageFont.truetype(font_path, 32) if font_path else ImageFont.load_default()
+        font_ayah = ImageFont.truetype(font_path, 42) if font_path else ImageFont.load_default()
     except Exception:
         font_ayah = ImageFont.load_default()
 
@@ -76,10 +91,11 @@ def create_ayah_text_image(ayah_text, font_path, width=540, height=960):
     lines = []
     current_line = []
     
+    # تقسيم النص تلقائياً لكي لا يخرج عن حدود الشاشة في التيك توك
     for word in words:
         test_line = " ".join(current_line + [word])
         bbox = draw.textbbox((0, 0), test_line, font=font_ayah, direction="rtl", language="ar")
-        if (bbox[2] - bbox[0]) < (width - 60):
+        if (bbox[2] - bbox[0]) < (width - 120):
             current_line.append(word)
         else:
             lines.append(" ".join(current_line))
@@ -87,13 +103,16 @@ def create_ayah_text_image(ayah_text, font_path, width=540, height=960):
     if current_line:
         lines.append(" ".join(current_line))
 
-    line_height = 45
-    y_start = (height // 2) - ((len(lines) * line_height) // 2)
+    line_height = 65
+    y_start = (height // 2) - ((len(lines) * line_height) // 2) - 40 # رفع للوسط قليلاً
     
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font_ayah, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
+        
+        # إضافة ظلال خفيفة وراء الكلام لسهولة القراءة
+        draw.text((x+2, y_start+2), line, fill=(0, 0, 0, 200), font=font_ayah, direction="rtl", language="ar")
         draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
 
@@ -110,7 +129,6 @@ def fetch_quran_data():
             res = requests.get(url, timeout=10).json()
             ayahs = res["data"]["ayahs"]
 
-            # اختيار بداية عشوائية للآيات
             start = random.randint(0, max(0, len(ayahs) - 3))
             selected = ayahs[start:]
             entry = f"{surah}_{start}_{reciter['id']}"
@@ -164,7 +182,6 @@ def build_batch():
                 downloaded.append((ayah, file_path, clip))
                 current_duration += clip.duration
 
-                # التوقف عند الوصول لـ 50 ثانية تقريباً
                 if current_duration >= TARGET_DURATION:
                     break
             else:
@@ -193,6 +210,7 @@ def generate_video():
         ayah_img = create_ayah_text_image(ayah['text'], font_path)
         ayah_clip = ImageClip(ayah_img).with_duration(clip.duration)
         
+        # إضافة تأثير انتقالي ناعم لكل آية
         if clip.duration > 0.6:
             ayah_clip = ayah_clip.with_effects([
                 vfx.FadeIn(0.3),
@@ -212,9 +230,10 @@ def generate_video():
 
     output_path = "quran_video.mp4"
     
+    # التصدير بأبعاد وسرعة مثالية للسيرفر والتيك توك (720x1280 HD)
     final_video.write_videofile(
         output_path, 
-        fps=15, 
+        fps=24, 
         codec="libx264", 
         audio_codec="aac", 
         preset="ultrafast",
@@ -253,7 +272,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو القرآن (50 ثانية)...")
+        print("🚀 بدء إنشاء فيديو القرآن المتناسق مع تيك توك...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الانتهاء بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
