@@ -4,6 +4,7 @@ import random
 import requests
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from concurrent.futures import ThreadPoolExecutor
 
 # استيرادات MoviePy 2.x
 from moviepy import AudioFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips, concatenate_audioclips
@@ -13,7 +14,8 @@ import moviepy.video.fx as vfx
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-TARGET_DURATION = 50.0  # مدة الفيديو 50 ثانية
+TARGET_DURATION = 50.0
+TIKTOK_USERNAME = "@a.m_4.4"
 
 RECITERS = [
     {"name": "الشيخ ياسر الدوسري", "id": "ar.yasseraddussary"},
@@ -38,32 +40,34 @@ def get_font():
     if not os.path.exists(font_path):
         try:
             url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
-            r = requests.get(url, timeout=15)
+            r = requests.get(url, timeout=10)
             with open(font_path, "wb") as f:
                 f.write(r.content)
         except Exception:
             return None
     return font_path
 
-# صورة اسم السورة والقارئ ثابته ومصممة بدقة لتناسب منطقة أمان تيك توك (TikTok Safe Zone)
 def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 255))
     draw = ImageDraw.Draw(img)
 
     try:
         font_sub = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
+        font_user = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
     except Exception:
         font_sub = ImageFont.load_default()
+        font_user = ImageFont.load_default()
+
+    bbox_user = draw.textbbox((0, 0), TIKTOK_USERNAME, font=font_user)
+    w_user = bbox_user[2] - bbox_user[0]
+    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180, 180), font=font_user)
 
     info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
     
-    # يوضع النص بارتفاع مناسب فوق أزرار التيك توك السفلى (تجنباً للتغطية)
     y_position = height - 220
-    
-    # إطار خفيف جمالي خلف اسم السورة والقارئ
     padding = 15
     draw.rounded_rectangle(
         [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
@@ -74,10 +78,8 @@ def create_static_info_image(surah_name, reciter_name, font_path, width=720, hei
     )
     
     draw.text((x_info, y_position), info_text, fill=(230, 230, 230, 255), font=font_sub, direction="rtl", language="ar")
-
     return np.array(img)
 
-# صورة الآية القرآنية مصممة بخط أوضح ومجهزة للتيك توك
 def create_ayah_text_image(ayah_text, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -91,7 +93,6 @@ def create_ayah_text_image(ayah_text, font_path, width=720, height=1280):
     lines = []
     current_line = []
     
-    # تقسيم النص تلقائياً لكي لا يخرج عن حدود الشاشة في التيك توك
     for word in words:
         test_line = " ".join(current_line + [word])
         bbox = draw.textbbox((0, 0), test_line, font=font_ayah, direction="rtl", language="ar")
@@ -104,14 +105,13 @@ def create_ayah_text_image(ayah_text, font_path, width=720, height=1280):
         lines.append(" ".join(current_line))
 
     line_height = 65
-    y_start = (height // 2) - ((len(lines) * line_height) // 2) - 40 # رفع للوسط قليلاً
+    y_start = (height // 2) - ((len(lines) * line_height) // 2) - 40
     
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font_ayah, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
         
-        # إضافة ظلال خفيفة وراء الكلام لسهولة القراءة
         draw.text((x+2, y_start+2), line, fill=(0, 0, 0, 200), font=font_ayah, direction="rtl", language="ar")
         draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
@@ -126,7 +126,7 @@ def fetch_quran_data():
         surah = random.randint(1, 114)
         try:
             url = f"https://api.alquran.cloud/v1/surah/{surah}/{reciter['id']}"
-            res = requests.get(url, timeout=10).json()
+            res = requests.get(url, timeout=5).json()
             ayahs = res["data"]["ayahs"]
 
             start = random.randint(0, max(0, len(ayahs) - 3))
@@ -135,49 +135,58 @@ def fetch_quran_data():
 
             if entry not in history:
                 save_history(entry)
-                return selected, res["data"]["name"], reciter["name"], surah, reciter
+                return selected, res["data"]["name"], reciter["name"]
         except Exception:
             continue
 
     fallback_ayahs = [
-        {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "number": 1},
-        {"text": "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "number": 2},
+        {"text": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/1.mp3"},
+        {"text": "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ", "audio": "https://cdn.islamic.network/quran/audio/128/ar.alafasy/2.mp3"},
     ]
-    return fallback_ayahs, "الفاتحة", RECITERS[0]["name"], 1, RECITERS[0]
+    return fallback_ayahs, "الفاتحة", RECITERS[0]["name"]
 
-def download_audio(url, filename):
+def download_single_audio(args):
+    index, url = args
+    filename = f"temp_{index}.mp3"
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=10)
         if r.status_code == 200 and len(r.content) > 1000:
             with open(filename, "wb") as f:
                 f.write(r.content)
-            return True
+            return index, filename
     except Exception:
         pass
-    return False
-
-def generate_tiktok_script(surah_name, reciter_name, duration_sec):
-    minutes = int(duration_sec // 60)
-    seconds = int(duration_sec % 60)
-    duration_str = f"{seconds} ثانية" if minutes == 0 else f"{minutes}:{seconds:02d} دقيقة"
-
-    caption = (
-        f"سورة {surah_name} | {duration_str}\n"
-        f"القارئ {reciter_name}"
-    )
-    return caption
+    return index, None
 
 def build_batch():
     for _ in range(5):
-        ayahs, surah_name, reciter_name, surah_num, reciter = fetch_quran_data()
+        ayahs, surah_name, reciter_name = fetch_quran_data()
+        
+        # اختيار الآيات المطلوبة لتصل لـ 50 ثانية أولاً
+        selected_ayahs = []
+        urls_to_download = []
+        
+        for i, ayah in enumerate(ayahs):
+            if ayah.get("audio"):
+                selected_ayahs.append(ayah)
+                urls_to_download.append((i, ayah["audio"]))
+            if len(selected_ayahs) >= 12: # الحد الأقصى التقريبي لـ 50 ثانية
+                break
+
+        # تنزيل جميع مقاطع الصوت دفعة واحدة بالتوازي (تسريع عملية التحميل)
+        downloaded_files = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = executor.map(download_single_audio, urls_to_download)
+            for idx, filepath in results:
+                if filepath:
+                    downloaded_files[idx] = filepath
+
         downloaded = []
         current_duration = 0.0
 
-        for i, ayah in enumerate(ayahs):
-            file_path = f"temp_{i}.mp3"
-            audio_url = ayah.get("audio")
-
-            if audio_url and download_audio(audio_url, file_path):
+        for i, ayah in enumerate(selected_ayahs):
+            if i in downloaded_files:
+                file_path = downloaded_files[i]
                 clip = AudioFileClip(file_path)
                 downloaded.append((ayah, file_path, clip))
                 current_duration += clip.duration
@@ -197,6 +206,13 @@ def build_batch():
 
     raise Exception("فشل تحميل المقطع الصوتي.")
 
+def generate_tiktok_script(surah_name, reciter_name, duration_sec):
+    minutes = int(duration_sec // 60)
+    seconds = int(duration_sec % 60)
+    duration_str = f"{seconds} ثانية" if minutes == 0 else f"{minutes}:{seconds:02d} دقيقة"
+
+    return f"سورة {surah_name} | {duration_str}\nالقارئ {reciter_name}"
+
 def generate_video():
     font_path = get_font()
     downloaded, surah_name, reciter_name = build_batch()
@@ -210,11 +226,10 @@ def generate_video():
         ayah_img = create_ayah_text_image(ayah['text'], font_path)
         ayah_clip = ImageClip(ayah_img).with_duration(clip.duration)
         
-        # إضافة تأثير انتقالي ناعم لكل آية
         if clip.duration > 0.6:
             ayah_clip = ayah_clip.with_effects([
-                vfx.FadeIn(0.3),
-                vfx.FadeOut(0.3)
+                vfx.FadeIn(0.2),
+                vfx.FadeOut(0.2)
             ])
             
         ayah_clips.append(ayah_clip)
@@ -230,10 +245,10 @@ def generate_video():
 
     output_path = "quran_video.mp4"
     
-    # التصدير بأبعاد وسرعة مثالية للسيرفر والتيك توك (720x1280 HD)
+    # التصدير بـ 20 إطار في الثانية وبأعلى أداء (Ultrafast) اختصاراً للوقت
     final_video.write_videofile(
         output_path, 
-        fps=24, 
+        fps=20, 
         codec="libx264", 
         audio_codec="aac", 
         preset="ultrafast",
@@ -259,22 +274,18 @@ def send_to_telegram(video_path, caption):
         if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
             with open(video_path, "rb") as video_file:
-                res = requests.post(
+                requests.post(
                     url,
                     files={"video": video_file},
-                    data={
-                        "chat_id": TELEGRAM_CHAT_ID,
-                        "caption": caption
-                    },
+                    data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
                     timeout=120,
                 )
-                print(f"نتيجة إرسال تيليجرام: {res.status_code}")
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو القرآن المتناسق مع تيك توك...")
+        print("🚀 بدء إنشاء الفيديو السريع...")
         output_video, caption_text = generate_video()
-        print(f"✅ تم الانتهاء بنجاح: {output_video}")
+        print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
     except Exception as err:
         print(f"❌ حدث خطأ أثناء التشغيل: {err}")
