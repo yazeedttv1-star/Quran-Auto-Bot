@@ -185,7 +185,7 @@ def build_batch():
             if ayah.get("audio"):
                 selected_ayahs.append(ayah)
                 urls_to_download.append((i, ayah["audio"]))
-            if len(selected_ayahs) >= 15:
+            if len(selected_ayahs) >= 25:
                 break
 
         downloaded_files = {}
@@ -238,40 +238,54 @@ def generate_video():
 
     audio_clips = []
     text_clips = []
+    accumulated_time = 0.0
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        audio_clips.append(clip)
+        # إن كان إضافة الصوت سينقله لما بعد الـ 50 ثانية يتم قصه بدقة
+        remaining_time = EXACT_DURATION - accumulated_time
+        if remaining_time <= 0:
+            break
 
+        effective_duration = min(clip.duration, remaining_time)
+        actual_audio_clip = clip.subclipped(0, effective_duration)
+        audio_clips.append(actual_audio_clip)
+
+        # تقسيم الآية متناسقاً مع مدة الصوت الفعلية
         segments = split_ayah_text(ayah['text'], max_words=3)
-        seg_duration = clip.duration / len(segments)
+        seg_duration = effective_duration / len(segments)
 
         for seg in segments:
             seg_img = create_segment_text_image(seg, font_path)
             seg_clip = ImageClip(seg_img).with_duration(seg_duration)
             
-            if seg_duration > 0.4:
+            if seg_duration > 0.3:
                 seg_clip = seg_clip.with_effects([
-                    vfx.FadeIn(0.15),
-                    vfx.FadeOut(0.15)
+                    vfx.FadeIn(0.1),
+                    vfx.FadeOut(0.1)
                 ])
             text_clips.append(seg_clip)
 
-    full_audio = concatenate_audioclips(audio_clips)
-    final_audio = full_audio.subclipped(0, EXACT_DURATION)
+        accumulated_time += effective_duration
+
+    # تجميع وتحديد الصوت والفيديو على 50.0 ثانية بالضبط
+    full_audio = concatenate_audioclips(audio_clips).subclipped(0, EXACT_DURATION)
 
     static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
     background_clip = ImageClip(static_info_img).with_duration(EXACT_DURATION)
 
     concat_texts = concatenate_videoclips(text_clips, method="compose").subclipped(0, EXACT_DURATION)
-    final_video = CompositeVideoClip([background_clip, concat_texts]).with_duration(EXACT_DURATION).with_audio(final_audio)
+    final_video = CompositeVideoClip([background_clip, concat_texts]).with_duration(EXACT_DURATION).with_audio(full_audio)
 
     output_path = "quran_video.mp4"
     
+    # إعدادات متوافقة مع تيك توك لتجنب رفض الصوت أو المشاكل
     final_video.write_videofile(
         output_path, 
-        fps=20, 
+        fps=25, 
         codec="libx264", 
         audio_codec="aac", 
+        audio_bitrate="128k",
+        audio_fps=44100,
         preset="ultrafast",
         ffmpeg_params=["-pix_fmt", "yuv420p"],
         threads=4,
@@ -279,7 +293,6 @@ def generate_video():
     )
 
     final_video.close()
-    final_audio.close()
     full_audio.close()
     background_clip.close()
     for _, f, c in downloaded:
@@ -306,7 +319,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء الفيديو بالطراز المرجعي الجديد...")
+        print("🚀 بدء إنشاء فيديو متوافق مع تيك توك مدته 50 ثانية بالضبط...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
