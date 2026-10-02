@@ -36,71 +36,67 @@ def save_history(entry):
         f.write(f"{entry}\n")
 
 def get_font():
-    font_path = "Amiri-Regular.ttf"
+    # استخدام خط KFGQPC Uthman Taha Naskh (خط المصحف الشريف العريض)
+    font_path = "UthmanicHafs.ttf"
     if not os.path.exists(font_path):
         try:
-            url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
+            url = "https://raw.githubusercontent.com/mottaghy/quran-font/master/fonts/UthmanicHafs1%20Ver13.ttf"
             r = requests.get(url, timeout=10)
-            with open(font_path, "wb") as f:
-                f.write(r.content)
+            if r.status_code == 200 and len(r.content) > 10000:
+                with open(font_path, "wb") as f:
+                    f.write(r.content)
+            else:
+                # خط بديل عريض بحال تعذر الأول
+                url_fallback = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
+                r2 = requests.get(url_fallback, timeout=10)
+                with open(font_path, "wb") as f:
+                    f.write(r2.content)
         except Exception:
             return None
     return font_path
 
-# خلفية كروما سوداء مع اسم الحساب ومعلومات القارئ
+# خلفية كروما سوداء ثابتة بها اسم الحساب والعلامة المائية ومعلومات القارئ في الأسفل
 def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
-    img = Image.new("RGB", (width, height), color=(0, 0, 0)) # أسود خالص (كروما سوداء)
+    img = Image.new("RGB", (width, height), color=(0, 0, 0)) # كروما سوداء
     draw = ImageDraw.Draw(img)
 
     try:
-        font_sub = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
+        font_sub = ImageFont.truetype(font_path, 26) if font_path else ImageFont.load_default()
         font_user = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
     except Exception:
         font_sub = ImageFont.load_default()
         font_user = ImageFont.load_default()
 
-    # اسم الحساب في الأعلى
-    bbox_user = draw.textbbox((0, 0), TIKTOK_USERNAME, font=font_user)
-    w_user = bbox_user[2] - bbox_user[0]
-    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180), font=font_user)
+    # اسم الحساب وعلامة TikTok في أسفل الشاشة اليسرى/الوسطى كالفيديو المرجعي
+    tiktok_label = f"🎵 TikTok\n{TIKTOK_USERNAME}"
+    draw.text((40, height - 120), tiktok_label, fill=(220, 220, 220), font=font_user)
 
-    # معلومات السورة والقارئ في الأسفل
-    info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
+    # معلومات السورة والقارئ في جهة اليمين بأسفل الشاشة
+    info_text = f"سورة {surah_name}\nالقارئ {reciter_name}"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
-    x_info = (width - w_info) // 2
-    
-    y_position = height - 220
-    padding = 15
-    draw.rounded_rectangle(
-        [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
-        radius=10,
-        fill=(20, 20, 20),
-        outline=(255, 255, 255),
-        width=1
-    )
-    
-    draw.text((x_info, y_position), info_text, fill=(230, 230, 230), font=font_sub, direction="rtl", language="ar")
+    draw.text((width - w_info - 40, height - 120), info_text, fill=(200, 200, 200), font=font_sub, direction="rtl", language="ar")
+
     return np.array(img)
 
-# رسم آية واحدة فقط في منتصف الشاشة
-def create_single_ayah_image(ayah_text, font_path, width=720, height=1280):
+# رسم المقاطع/الكلمات بخط عريض كبير في المنتصف
+def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
-        font_ayah = ImageFont.truetype(font_path, 42) if font_path else ImageFont.load_default()
+        font_ayah = ImageFont.truetype(font_path, 52) if font_path else ImageFont.load_default()
     except Exception:
         font_ayah = ImageFont.load_default()
 
-    words = ayah_text.split()
+    words = text_segment.split()
     lines = []
     current_line = []
     
     for word in words:
         test_line = " ".join(current_line + [word])
         bbox = draw.textbbox((0, 0), test_line, font=font_ayah, direction="rtl", language="ar")
-        if (bbox[2] - bbox[0]) < (width - 120):
+        if (bbox[2] - bbox[0]) < (width - 100):
             current_line.append(word)
         else:
             lines.append(" ".join(current_line))
@@ -108,21 +104,27 @@ def create_single_ayah_image(ayah_text, font_path, width=720, height=1280):
     if current_line:
         lines.append(" ".join(current_line))
 
-    line_height = 65
-    y_start = (height // 2) - ((len(lines) * line_height) // 2)
+    line_height = 85
+    y_start = (height // 2) - ((len(lines) * line_height) // 2) - 30
     
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font_ayah, direction="rtl", language="ar")
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
         
-        # ظل خفيف خلف النص
-        draw.text((x+2, y_start+2), line, fill=(0, 0, 0, 200), font=font_ayah, direction="rtl", language="ar")
-        # النص الأبيض
+        # كتابة النص باللون الأبيض البارز المصمّم
         draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
 
     return np.array(img)
+
+# تقسيم النص الطويل إلى أجزاء صغيرة تتناسب مع العرض بالتتابع
+def split_ayah_text(text, max_words=4):
+    words = text.split()
+    segments = []
+    for i in range(0, len(words), max_words):
+        segments.append(" ".join(words[i:i + max_words]))
+    return segments
 
 def fetch_quran_data():
     history = load_history()
@@ -220,43 +222,43 @@ def build_batch():
     raise Exception("تعذر جلب مقطع يتجاوز 50 ثانية.")
 
 def generate_tiktok_script(surah_name, reciter_name):
-    return f"سورة {surah_name} | كروما سوداء\nالقارئ {reciter_name}"
+    return f"سورة {surah_name} | 50 ثانية\nالقارئ {reciter_name}"
 
 def generate_video():
     font_path = get_font()
     downloaded, surah_name, reciter_name = build_batch()
 
     audio_clips = []
-    ayah_clips = []
+    text_clips = []
 
-    # معالجة كل آية بشكل مستقل لتعرض وحدها متزامنة مع مدة صوتها
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
         audio_clips.append(clip)
 
-        # إنشاء صورة للآية الحالية فقط
-        ayah_img = create_single_ayah_image(ayah['text'], font_path)
-        
-        # ضبط مدة عرض صورة الآية لتسُاوي تماماً مدة صوت الآية
-        ayah_clip = ImageClip(ayah_img).with_duration(clip.duration)
-        
-        if clip.duration > 0.6:
-            ayah_clip = ayah_clip.with_effects([
-                vfx.FadeIn(0.2),
-                vfx.FadeOut(0.2)
-            ])
+        # تقسيم الآية إلى أجزاء قصيرة لتزامن الكلمات كالفيديو
+        segments = split_ayah_text(ayah['text'], max_words=3)
+        seg_duration = clip.duration / len(segments)
+
+        for seg in segments:
+            seg_img = create_segment_text_image(seg, font_path)
+            seg_clip = ImageClip(seg_img).with_duration(seg_duration)
             
-        ayah_clips.append(ayah_clip)
+            # إضافة تأثير الظهور والاختفاء التدريجي لكل مقطع
+            if seg_duration > 0.4:
+                seg_clip = seg_clip.with_effects([
+                    vfx.FadeIn(0.15),
+                    vfx.FadeOut(0.15)
+                ])
+            text_clips.append(seg_clip)
 
     full_audio = concatenate_audioclips(audio_clips)
     final_audio = full_audio.subclipped(0, EXACT_DURATION)
 
-    # إنشاء الخلفية السوداء الثابتة (الكروما)
+    # إنشاء كروما سوداء تحتوي أسفلها على اسم القارئ والسورة واسم الحساب
     static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
     background_clip = ImageClip(static_info_img).with_duration(EXACT_DURATION)
 
-    # دمج الآيات متتالية واحدة تلو الأخرى
-    concat_ayahs = concatenate_videoclips(ayah_clips, method="compose").subclipped(0, EXACT_DURATION)
-    final_video = CompositeVideoClip([background_clip, concat_ayahs]).with_duration(EXACT_DURATION).with_audio(final_audio)
+    concat_texts = concatenate_videoclips(text_clips, method="compose").subclipped(0, EXACT_DURATION)
+    final_video = CompositeVideoClip([background_clip, concat_texts]).with_duration(EXACT_DURATION).with_audio(final_audio)
 
     output_path = "quran_video.mp4"
     
@@ -299,7 +301,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو كروما سوداء (آية بآية)...")
+        print("🚀 بدء إنشاء الفيديو بالطراز المرجعي...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
