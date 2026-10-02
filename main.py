@@ -36,7 +36,6 @@ def save_history(entry):
         f.write(f"{entry}\n")
 
 def get_font():
-    # استخدام خط KFGQPC Uthman Taha Naskh (خط المصحف الشريف العريض)
     font_path = "UthmanicHafs.ttf"
     if not os.path.exists(font_path):
         try:
@@ -46,7 +45,6 @@ def get_font():
                 with open(font_path, "wb") as f:
                     f.write(r.content)
             else:
-                # خط بديل عريض بحال تعذر الأول
                 url_fallback = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
                 r2 = requests.get(url_fallback, timeout=10)
                 with open(font_path, "wb") as f:
@@ -55,37 +53,49 @@ def get_font():
             return None
     return font_path
 
-# خلفية كروما سوداء ثابتة بها اسم الحساب والعلامة المائية ومعلومات القارئ في الأسفل
+# خلفية كروما سوداء: اليوزر في الأعلى بالمنتصف، والسورة والقارئ في الأسفل بالمنتصف
 def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
     img = Image.new("RGB", (width, height), color=(0, 0, 0)) # كروما سوداء
     draw = ImageDraw.Draw(img)
 
     try:
-        font_sub = ImageFont.truetype(font_path, 26) if font_path else ImageFont.load_default()
+        font_sub = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
         font_user = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
     except Exception:
         font_sub = ImageFont.load_default()
         font_user = ImageFont.load_default()
 
-    # اسم الحساب وعلامة TikTok في أسفل الشاشة اليسرى/الوسطى كالفيديو المرجعي
-    tiktok_label = f"🎵 TikTok\n{TIKTOK_USERNAME}"
-    draw.text((40, height - 120), tiktok_label, fill=(220, 220, 220), font=font_user)
+    # 1. اسم الحساب (اليوزر) في الأعلى بالمنتصف
+    bbox_user = draw.textbbox((0, 0), TIKTOK_USERNAME, font=font_user)
+    w_user = bbox_user[2] - bbox_user[0]
+    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180), font=font_user)
 
-    # معلومات السورة والقارئ في جهة اليمين بأسفل الشاشة
-    info_text = f"سورة {surah_name}\nالقارئ {reciter_name}"
+    # 2. اسم السورة والقارئ في المنتصف من تحت داخل إطار
+    info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
-    draw.text((width - w_info - 40, height - 120), info_text, fill=(200, 200, 200), font=font_sub, direction="rtl", language="ar")
-
+    x_info = (width - w_info) // 2
+    
+    y_position = height - 220
+    padding = 15
+    draw.rounded_rectangle(
+        [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
+        radius=10,
+        fill=(20, 20, 20),
+        outline=(255, 255, 255),
+        width=1
+    )
+    
+    draw.text((x_info, y_position), info_text, fill=(230, 230, 230), font=font_sub, direction="rtl", language="ar")
     return np.array(img)
 
-# رسم المقاطع/الكلمات بخط عريض كبير في المنتصف
+# رسم أجزاء الآية بخط المصحف العريض في المنتصف
 def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
-        font_ayah = ImageFont.truetype(font_path, 52) if font_path else ImageFont.load_default()
+        font_ayah = ImageFont.truetype(font_path, 50) if font_path else ImageFont.load_default()
     except Exception:
         font_ayah = ImageFont.load_default()
 
@@ -104,7 +114,7 @@ def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     if current_line:
         lines.append(" ".join(current_line))
 
-    line_height = 85
+    line_height = 80
     y_start = (height // 2) - ((len(lines) * line_height) // 2) - 30
     
     for line in lines:
@@ -112,14 +122,12 @@ def create_segment_text_image(text_segment, font_path, width=720, height=1280):
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
         
-        # كتابة النص باللون الأبيض البارز المصمّم
         draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
 
     return np.array(img)
 
-# تقسيم النص الطويل إلى أجزاء صغيرة تتناسب مع العرض بالتتابع
-def split_ayah_text(text, max_words=4):
+def split_ayah_text(text, max_words=3):
     words = text.split()
     segments = []
     for i in range(0, len(words), max_words):
@@ -222,7 +230,7 @@ def build_batch():
     raise Exception("تعذر جلب مقطع يتجاوز 50 ثانية.")
 
 def generate_tiktok_script(surah_name, reciter_name):
-    return f"سورة {surah_name} | 50 ثانية\nالقارئ {reciter_name}"
+    return f"سورة {surah_name} | كروما سوداء\nالقارئ {reciter_name}"
 
 def generate_video():
     font_path = get_font()
@@ -234,7 +242,6 @@ def generate_video():
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
         audio_clips.append(clip)
 
-        # تقسيم الآية إلى أجزاء قصيرة لتزامن الكلمات كالفيديو
         segments = split_ayah_text(ayah['text'], max_words=3)
         seg_duration = clip.duration / len(segments)
 
@@ -242,7 +249,6 @@ def generate_video():
             seg_img = create_segment_text_image(seg, font_path)
             seg_clip = ImageClip(seg_img).with_duration(seg_duration)
             
-            # إضافة تأثير الظهور والاختفاء التدريجي لكل مقطع
             if seg_duration > 0.4:
                 seg_clip = seg_clip.with_effects([
                     vfx.FadeIn(0.15),
@@ -253,7 +259,6 @@ def generate_video():
     full_audio = concatenate_audioclips(audio_clips)
     final_audio = full_audio.subclipped(0, EXACT_DURATION)
 
-    # إنشاء كروما سوداء تحتوي أسفلها على اسم القارئ والسورة واسم الحساب
     static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
     background_clip = ImageClip(static_info_img).with_duration(EXACT_DURATION)
 
@@ -301,7 +306,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء الفيديو بالطراز المرجعي...")
+        print("🚀 بدء إنشاء الفيديو بالطراز المرجعي الجديد...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
