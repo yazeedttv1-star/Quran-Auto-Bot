@@ -10,11 +10,13 @@ from concurrent.futures import ThreadPoolExecutor
 from moviepy import AudioFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips, concatenate_audioclips
 import moviepy.video.fx as vfx
 
-# --- الإعدادات ---
+# --- الإعدادات المُعدّلة لزيادة الانتشار ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.txt"
-EXACT_DURATION = 50.0  # مدة الفيديو والصوت إجمالياً 50 ثانية بالضبط
+
+# 1. تقليل المدة إلى 25-30 ثانية لرفع معدل إكمال المشاهدة (Watch Time)
+EXACT_DURATION = 25.0  
 TIKTOK_USERNAME = "@a.m_4.4"
 
 RECITERS = [
@@ -53,49 +55,55 @@ def get_font():
             return None
     return font_path
 
-# خلفية كروما سوداء: اليوزر في الأعلى بالمنتصف، والسورة والقارئ في الأسفل بالمنتصف
+# تصميم الخلفية مع إضافة عبارة تحفيزية للـ Interaction
 def create_static_info_image(surah_name, reciter_name, font_path, width=720, height=1280):
-    img = Image.new("RGB", (width, height), color=(0, 0, 0)) # كروما سوداء
+    img = Image.new("RGB", (width, height), color=(10, 10, 12)) 
     draw = ImageDraw.Draw(img)
 
     try:
-        font_sub = ImageFont.truetype(font_path, 28) if font_path else ImageFont.load_default()
+        font_sub = ImageFont.truetype(font_path, 26) if font_path else ImageFont.load_default()
         font_user = ImageFont.truetype(font_path, 22) if font_path else ImageFont.load_default()
+        font_cta = ImageFont.truetype(font_path, 20) if font_path else ImageFont.load_default()
     except Exception:
-        font_sub = ImageFont.load_default()
-        font_user = ImageFont.load_default()
+        font_sub = font_user = font_cta = ImageFont.load_default()
 
-    # 1. اسم الحساب (اليوزر) في الأعلى بالمنتصف
+    # 1. اليوزر في الأعلى
     bbox_user = draw.textbbox((0, 0), TIKTOK_USERNAME, font=font_user)
     w_user = bbox_user[2] - bbox_user[0]
-    draw.text(((width - w_user) // 2, 120), TIKTOK_USERNAME, fill=(180, 180, 180), font=font_user)
+    draw.text(((width - w_user) // 2, 100), TIKTOK_USERNAME, fill=(200, 200, 200), font=font_user)
 
-    # 2. اسم السورة والقارئ في المنتصف من تحت داخل إطار
+    # 2. نص تحفيزي للتفاعل (يزود الإعجابات والمشاركات تلقائياً)
+    cta_text = "✨ شارك تؤجر | اكتب اسم سورتك المفضلة"
+    bbox_cta = draw.textbbox((0, 0), cta_text, font=font_cta, direction="rtl", language="ar")
+    w_cta = bbox_cta[2] - bbox_cta[0]
+    draw.text(((width - w_cta) // 2, height - 120), cta_text, fill=(255, 215, 0), font=font_cta, direction="rtl", language="ar")
+
+    # 3. اسم السورة والقارئ أسفل الشاشة
     info_text = f"سورة {surah_name} ﴿ {reciter_name} ﴾"
     bbox_info = draw.textbbox((0, 0), info_text, font=font_sub, direction="rtl", language="ar")
     w_info = bbox_info[2] - bbox_info[0]
     x_info = (width - w_info) // 2
     
     y_position = height - 220
-    padding = 15
+    padding = 12
     draw.rounded_rectangle(
         [x_info - padding, y_position - 5, x_info + w_info + padding, y_position + 45],
-        radius=10,
-        fill=(20, 20, 20),
+        radius=12,
+        fill=(25, 25, 28),
         outline=(255, 255, 255),
         width=1
     )
     
-    draw.text((x_info, y_position), info_text, fill=(230, 230, 230), font=font_sub, direction="rtl", language="ar")
+    draw.text((x_info, y_position), info_text, fill=(240, 240, 240), font=font_sub, direction="rtl", language="ar")
     return np.array(img)
 
-# رسم أجزاء الآية بخط المصحف العريض في المنتصف
+# رسم الآية الكاملة أو تقسيمها لجمل أطول لمنع الحركة السريعة المشتتة
 def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     img = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:
-        font_ayah = ImageFont.truetype(font_path, 50) if font_path else ImageFont.load_default()
+        font_ayah = ImageFont.truetype(font_path, 46) if font_path else ImageFont.load_default()
     except Exception:
         font_ayah = ImageFont.load_default()
 
@@ -106,7 +114,7 @@ def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     for word in words:
         test_line = " ".join(current_line + [word])
         bbox = draw.textbbox((0, 0), test_line, font=font_ayah, direction="rtl", language="ar")
-        if (bbox[2] - bbox[0]) < (width - 100):
+        if (bbox[2] - bbox[0]) < (width - 120):
             current_line.append(word)
         else:
             lines.append(" ".join(current_line))
@@ -114,7 +122,7 @@ def create_segment_text_image(text_segment, font_path, width=720, height=1280):
     if current_line:
         lines.append(" ".join(current_line))
 
-    line_height = 80
+    line_height = 85
     y_start = (height // 2) - ((len(lines) * line_height) // 2) - 30
     
     for line in lines:
@@ -122,12 +130,15 @@ def create_segment_text_image(text_segment, font_path, width=720, height=1280):
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
         
+        # ظل خلف النص لزيادة الوضوح
+        draw.text((x+2, y_start+2), line, fill=(0, 0, 0, 200), font=font_ayah, direction="rtl", language="ar")
         draw.text((x, y_start), line, fill=(255, 255, 255, 255), font=font_ayah, direction="rtl", language="ar")
         y_start += line_height
 
     return np.array(img)
 
-def split_ayah_text(text, max_words=3):
+# زيادة عدد الكلمات للجملة الواحدة ليصبح القراءة مريحة
+def split_ayah_text(text, max_words=5):
     words = text.split()
     segments = []
     for i in range(0, len(words), max_words):
@@ -185,7 +196,7 @@ def build_batch():
             if ayah.get("audio"):
                 selected_ayahs.append(ayah)
                 urls_to_download.append((i, ayah["audio"]))
-            if len(selected_ayahs) >= 25:
+            if len(selected_ayahs) >= 15:
                 break
 
         downloaded_files = {}
@@ -227,10 +238,16 @@ def build_batch():
             if os.path.exists(f):
                 os.remove(f)
 
-    raise Exception("تعذر جلب مقطع يتجاوز 50 ثانية.")
+    raise Exception("تعذر جلب مقطع يتجاوز المدة المطلوبة.")
 
+# تحسين الوصف التلقائي لتيك توك بـ الهاشتاجات الذكية
 def generate_tiktok_script(surah_name, reciter_name):
-    return f"سورة {surah_name} | كروما سوداء\nالقارئ {reciter_name}"
+    return (
+        f"تلاوة خاشعة من سورة {surah_name} 🌿\n"
+        f"القارئ: {reciter_name}\n\n"
+        f"لا تنسَ المشاركة وإبداء الإعجاب تؤجر 🤍\n"
+        f"#قران #تلاوة_خاشعة #قران_كريم #foryou #fyp #القران_الكريم"
+    )
 
 def generate_video():
     font_path = get_font()
@@ -241,7 +258,6 @@ def generate_video():
     accumulated_time = 0.0
 
     for idx, (ayah, file_path, clip) in enumerate(downloaded):
-        # إن كان إضافة الصوت سينقله لما بعد الـ 50 ثانية يتم قصه بدقة
         remaining_time = EXACT_DURATION - accumulated_time
         if remaining_time <= 0:
             break
@@ -250,8 +266,8 @@ def generate_video():
         actual_audio_clip = clip.subclipped(0, effective_duration)
         audio_clips.append(actual_audio_clip)
 
-        # تقسيم الآية متناسقاً مع مدة الصوت الفعلية
-        segments = split_ayah_text(ayah['text'], max_words=3)
+        # تقسيم إلى جمل أطول بحد أقصى 5 كلمات لتكون مريحة بصرياً
+        segments = split_ayah_text(ayah['text'], max_words=5)
         seg_duration = effective_duration / len(segments)
 
         for seg in segments:
@@ -260,14 +276,13 @@ def generate_video():
             
             if seg_duration > 0.3:
                 seg_clip = seg_clip.with_effects([
-                    vfx.FadeIn(0.1),
-                    vfx.FadeOut(0.1)
+                    vfx.FadeIn(0.12),
+                    vfx.FadeOut(0.12)
                 ])
             text_clips.append(seg_clip)
 
         accumulated_time += effective_duration
 
-    # تجميع وتحديد الصوت والفيديو على 50.0 ثانية بالضبط
     full_audio = concatenate_audioclips(audio_clips).subclipped(0, EXACT_DURATION)
 
     static_info_img = create_static_info_image(surah_name, reciter_name, font_path)
@@ -278,7 +293,6 @@ def generate_video():
 
     output_path = "quran_video.mp4"
     
-    # إعدادات متوافقة مع تيك توك لتجنب رفض الصوت أو المشاكل
     final_video.write_videofile(
         output_path, 
         fps=25, 
@@ -319,7 +333,7 @@ def send_to_telegram(video_path, caption):
 
 if __name__ == "__main__":
     try:
-        print("🚀 بدء إنشاء فيديو متوافق مع تيك توك مدته 50 ثانية بالضبط...")
+        print("🚀 بدء إنشاء فيديو متوافق ومحسّن للانتشار على تيك توك...")
         output_video, caption_text = generate_video()
         print(f"✅ تم الإنشاء والتصدير بنجاح: {output_video}")
         send_to_telegram(output_video, caption_text)
